@@ -15,8 +15,8 @@ A six-stage wizard. It only asks you for the things a human has to do in a brows
 | Stage | You do | Produces |
 | --- | --- | --- |
 | 1 · Preflight | nothing — checks Node 20+ and runs the offline fixture check | — |
-| 2 · Integration | create it in Notion, copy the secret (hidden entry) | `NOTION_TOKEN` |
-| 3 · Parent page | create a page and share it via **••• → Connections** | `NOTION_PARENT_PAGE_ID` |
+| 2 · Access token | create a personal access token, copy it (hidden entry) | `NOTION_TOKEN` |
+| 3 · Parent page | create an empty page, paste its URL | `NOTION_PARENT_PAGE_ID` |
 | 4 · Verify access | nothing — probes the API and says *which* of stage 2 or 3 went wrong | — |
 | 5 · Create + seed | confirm; this is the first write to your workspace | `NOTION_DATABASE_ID`, `NOTION_DATA_SOURCE_ID` |
 | 6 · Record | confirm posting the ids to [#5](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/5) | — |
@@ -104,10 +104,20 @@ These survive the seeding intact, because the transform has to deal with them:
 `.env` (gitignored) after the wizard runs:
 
 ```
-NOTION_TOKEN=ntn_…            # internal integration secret
-NOTION_PARENT_PAGE_ID=…       # page the integration was shared with
+NOTION_TOKEN=ntn_…            # personal access token
+NOTION_PARENT_PAGE_ID=…       # page the database is created under
 NOTION_DATABASE_ID=…          # written by the seeder
 NOTION_DATA_SOURCE_ID=…       # written by the seeder — this is what queries need
 ```
 
-The demo's real login is full Notion **OAuth**, not this token (see [#4](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/4)). The internal integration exists only to stand the fixture up and to let the pipeline be developed without a browser round-trip on every run.
+The demo's real login is full Notion **OAuth**, not this token (see [#4](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/4)). The token exists only to stand the fixture up and to let the pipeline be developed without a browser round-trip on every run.
+
+### Getting a token
+
+https://www.notion.so/developers/tokens → **New token** → name it → tick the **Notion API** capability → **Create token**. It starts `ntn_` and is shown **once**.
+
+Notion has renamed *integrations* to **connections**, so older guides — including much of what search turns up — point at `notion.so/profile/integrations`, which no longer exists. That is the likely source of confusion if you go looking.
+
+A **personal access token** acts as you and carries your own permissions, so the parent page needs no sharing step. An **internal connection's** secret works too, but then the page must be shared with it explicitly (page → **•••** → **Connections**) — otherwise the API returns `404`, not a permission error, because Notion hides pages a token cannot reach. Stage 4 of the wizard distinguishes these before anything is written.
+
+On Business and Enterprise plans, token creation is disabled by default; a workspace owner enables it under **Settings → Connections**.

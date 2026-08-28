@@ -218,45 +218,51 @@ printf '\n'
 pause "Fixture is good. Press Enter to start on Notion."
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
-stage "Notion — create an integration"
-say "Notion will not talk to the API until an 'internal integration' exists."
+stage "Notion — create an access token"
+say "A personal access token acts as you, with your permissions. It is the"
+say "shortest route: no integration to create, no page to share."
 printf '\n'
-open_url "https://www.notion.so/profile/integrations"
+open_url "https://www.notion.so/developers/tokens"
 printf '\n'
-step "Click 'New integration'."
-step "Name it anything — notion2attio-dev is fine."
-step "Associated workspace: the workspace you want the demo database in."
-step "Type: Internal."
-step "Under Capabilities tick: Read content, Update content, Insert content."
-step "Save, open the integration, and reveal its Internal Integration Secret."
+step "Click 'New token'."
+step "Give it a name — notion2attio-dev is fine."
+step "Tick the 'Notion API' capability."
+step "If a workspace picker appears, choose the workspace you want the"
+step "  demo database in. Remember which one — it matters in stage 3."
+step "Click 'Create token', then copy it."
 printf '\n'
-note "The secret starts with ntn_ (older integrations start with secret_)."
-note "Input is hidden — nothing you type here appears on screen."
+warn "Notion shows the token once. Copy it before leaving that screen."
+note "It starts with ntn_. Input below is hidden — nothing appears on screen."
 printf '\n'
-ask_secret NOTION_TOKEN "Paste the integration secret:"
+note "Notion renamed 'integrations' to 'connections', so older guides point at"
+note "notion.so/profile/integrations, which no longer exists. If you already"
+note "have an internal connection's secret, that works here too."
+printf '\n'
+note "On Business/Enterprise plans token creation is off by default; a workspace"
+note "owner enables it under Settings → Connections."
+printf '\n'
+ask_secret NOTION_TOKEN "Paste the token:"
 if [[ -z "$NOTION_TOKEN" ]]; then
   warn "no token entered — re-run when you have it."
   exit 1
 fi
 write_env NOTION_TOKEN "$NOTION_TOKEN"
-note "$ENV_FILE is gitignored; the secret stays on this machine."
+note "$ENV_FILE is gitignored; the token stays on this machine."
 printf '\n'
 pause
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
-stage "Notion — create a parent page and share it"
-say "The database is created inside a page you own, and the integration can"
-say "only see pages you have explicitly shared with it."
+stage "Notion — create a parent page"
+say "The database gets created inside a page you own."
 printf '\n'
 open_url "https://www.notion.so/"
 printf '\n'
 step "Create a new, empty page — 'notion2attio demo' is fine."
-step "On that page: ••• menu (top right) → Connections."
-step "Pick the integration you created in the last stage."
+step "Make sure it is in the workspace you picked in stage 2."
 step "Copy the page URL from the address bar."
 printf '\n'
-warn "Skip the Connections step and the API returns 404, not a permission error —"
-note "  Notion hides unshared pages from an integration entirely."
+note "With a personal access token you should NOT need to share the page —"
+note "the token already has your own permissions. The next stage checks."
 printf '\n'
 ask NOTION_PARENT_PAGE_ID "Paste the page URL (or just its id):"
 
@@ -287,20 +293,30 @@ HTTP_STATUS="$(curl -sS -o "$PROBE" -w '%{http_code}' \
 
 case "$HTTP_STATUS" in
   200)
-    note "200 OK — the integration can read the parent page."
+    note "200 OK — the token can read the parent page."
     rm -f "$PROBE"
     ;;
   401)
     warn "401 — Notion rejected the token."
-    note "Re-run and re-copy the Internal Integration Secret (stage 2)."
+    note "Re-run and re-copy it from https://www.notion.so/developers/tokens"
+    note "(Notion shows a token once; a truncated paste looks like this too.)"
     rm -f "$PROBE"
     exit 1
     ;;
   404)
-    warn "404 — the integration cannot see that page."
-    note "Almost always the ••• → Connections step in stage 3."
-    note "Also 404 if the page lives in a different workspace than the one"
-    note "the integration was associated with."
+    warn "404 — the token cannot see that page."
+    printf '\n'
+    note "Notion hides pages a token cannot reach, so this is 404 rather than"
+    note "a permission error. Two likely causes, in order:"
+    printf '\n'
+    note "  1. The page is in a DIFFERENT workspace than the one you chose"
+    note "     when creating the token. Move the page, or make a new token"
+    note "     in the right workspace."
+    note "  2. You used an internal connection's secret rather than a personal"
+    note "     access token. Those need the page shared explicitly:"
+    note "     open the page → ••• menu → Connections → pick it."
+    printf '\n'
+    note "Fix either, then re-run — your saved values will be offered back."
     rm -f "$PROBE"
     exit 1
     ;;
