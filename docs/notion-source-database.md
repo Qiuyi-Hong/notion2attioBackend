@@ -7,10 +7,23 @@ Resolves [#5](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/5).
 ## Standing it up
 
 ```bash
-bash scripts/notion-setup-wizard.sh
+npm run notion:setup
 ```
 
-The wizard walks the three steps only a human can do (create an internal integration, copy its secret, share a parent page with it), then runs the seeder. Everything after that is scripted and repeatable:
+A six-stage wizard. It only asks you for the things a human has to do in a browser; everything else it does itself, and it stops before writing anything to your workspace until it has proved the token works.
+
+| Stage | You do | Produces |
+| --- | --- | --- |
+| 1 · Preflight | nothing — checks Node 20+ and runs the offline fixture check | — |
+| 2 · Integration | create it in Notion, copy the secret (hidden entry) | `NOTION_TOKEN` |
+| 3 · Parent page | create a page and share it via **••• → Connections** | `NOTION_PARENT_PAGE_ID` |
+| 4 · Verify access | nothing — probes the API and says *which* of stage 2 or 3 went wrong | — |
+| 5 · Create + seed | confirm; this is the first write to your workspace | `NOTION_DATABASE_ID`, `NOTION_DATA_SOURCE_ID` |
+| 6 · Record | confirm posting the ids to [#5](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/5) | — |
+
+Ctrl-C at any point is safe; values already captured are in `.env` and a re-run offers them as defaults. Stage 6 deliberately does **not** close #5 — closing a wayfinder ticket also means writing its resolution into the map, which the agent does.
+
+Everything after stage 4 is scripted and repeatable:
 
 | Script | What it does |
 | --- | --- |

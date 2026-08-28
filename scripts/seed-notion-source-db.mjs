@@ -14,7 +14,7 @@
  * Requires Node 20+ (global fetch). No dependencies.
  */
 
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -38,6 +38,16 @@ function loadEnvFile() {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
   }
+}
+
+/** Upsert KEY=VALUE into .env, replacing any existing line. Idempotent across re-runs. */
+function upsertEnv(pairs) {
+  const existing = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, 'utf8').split('\n') : [];
+  const keys = Object.keys(pairs);
+  const kept = existing.filter((l) => !keys.some((k) => l.startsWith(`${k}=`)));
+  while (kept.length && kept[kept.length - 1].trim() === '') kept.pop();
+  const lines = [...kept, ...keys.map((k) => `${k}=${pairs[k]}`), ''];
+  writeFileSync(ENV_PATH, lines.join('\n'));
 }
 
 /** Minimal RFC4180 parser: handles quoted fields, embedded commas and "" escapes. */
@@ -249,15 +259,24 @@ async function main() {
     throw new Error(`Filter self-check FAILED: expected ${EXPECTED_MATCHES}, got ${got}`);
   }
 
-  appendFileSync(ENV_PATH, `\nNOTION_DATABASE_ID=${db.id}\nNOTION_DATA_SOURCE_ID=${dataSourceId}\n`);
-  console.log('Filter self-check passed. Ids appended to .env:');
+  upsertEnv({ NOTION_DATABASE_ID: db.id, NOTION_DATA_SOURCE_ID: dataSourceId });
+  console.log('Filter self-check passed. Ids written to .env:');
   console.log(`NOTION_DATABASE_ID=${db.id}`);
   console.log(`NOTION_DATA_SOURCE_ID=${dataSourceId}`);
   console.log(`\nURL: https://www.notion.so/${db.id.replace(/-/g, '')}`);
 }
 
 // Exported so the fixture can be checked without touching the Notion API.
-export { parseCsv, buildSchema, buildProperties, CSV_PATH, TARGET_BATCH, TARGET_STATUS, EXPECTED_MATCHES };
+export {
+  parseCsv,
+  buildSchema,
+  buildProperties,
+  upsertEnv,
+  CSV_PATH,
+  TARGET_BATCH,
+  TARGET_STATUS,
+  EXPECTED_MATCHES,
+};
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
