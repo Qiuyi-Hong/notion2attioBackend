@@ -63,6 +63,8 @@ Every Warn is one of two kinds:
 - **Decision** — the reviewer's answer changes the files.
 - **Notice** — nothing changes. The pipeline records that a human read it. A notice is what the pipeline produces when it can only relay a suspicion it cannot check.
 
+One flag is one *problem*, not one piece of evidence. A notice may therefore carry more than one kind of evidence for the same suspicion, and one span of the source text may be evidence for two of them. Lattice Forge's notes name both an earlier email alias and a match with an earlier campaign; both point at the one thing the reviewer can act on — *this person may already exist in Attio* — so they reach the reviewer as a single notice to acknowledge once, not as two.
+
 ### Batch flag
 
 A flag that sits on the batch rather than on a candidate. Asked once, in one place, before the files are made.
