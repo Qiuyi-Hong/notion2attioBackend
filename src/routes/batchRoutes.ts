@@ -10,7 +10,7 @@
 
 import { Router } from "express";
 import { ApiError } from "../errors.ts";
-import { findSharedDataSource, queryReadyRows } from "../notion.ts";
+import { findSharedDataSource, queryReadyBatches } from "../notion.ts";
 import { readConnection } from "../store.ts";
 
 const router = Router();
@@ -39,16 +39,15 @@ router.get("/", async (_req, res) => {
   }
 
   const ready = new Map<string, number>();
-  for (const row of await queryReadyRows(
+  for (const batch of await queryReadyBatches(
     connection.access_token,
     dataSourceId,
   )) {
-    // `Batch` is a select, and an unset one belongs to no run.
-    const batch = row.properties?.Batch?.select?.name;
-    if (batch) ready.set(batch, (ready.get(batch) ?? 0) + 1);
+    ready.set(batch, (ready.get(batch) ?? 0) + 1);
   }
 
-  // Most recent week first: it is the one a reviewer opens the app to run.
+  // Most recent week first — ISO weeks are zero-padded, so a plain string
+  // comparison orders them. It is the week a reviewer opens the app to run.
   res.json(
     [...ready]
       .sort(([a], [b]) => b.localeCompare(a))

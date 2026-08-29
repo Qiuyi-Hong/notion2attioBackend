@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
+import { fakeNotion } from "./notion-fake.mjs";
+
 import {
   parseCsv,
   buildProperties,
@@ -88,38 +90,11 @@ function applyFilter(filter) {
 
 // ── The Notion fake ────────────────────────────────────────────────────────
 
-const realFetch = globalThis.fetch;
-/** Calls Notion saw, oldest first: `{ path, method, auth, version, body }`. */
-let notionCalls = [];
-/** `{ [path]: (body) => [status, json] }`, replaced per test. */
-let notionScript = {};
-
-globalThis.fetch = async (input, init) => {
-  const url = new URL(String(input instanceof Request ? input.url : input));
-  if (url.origin !== "https://api.notion.com") return realFetch(input, init);
-  const body = init?.body ? JSON.parse(init.body) : undefined;
-  notionCalls.push({
-    path: url.pathname,
-    method: init?.method,
-    auth: init?.headers?.Authorization,
-    version: init?.headers?.["Notion-Version"],
-    body,
-  });
-  const reply = notionScript[url.pathname];
-  assert.ok(
-    reply,
-    `the app called ${url.pathname}, which this test did not script`,
-  );
-  const [status, json] = reply(body);
-  return new Response(JSON.stringify(json), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-};
+const notion = fakeNotion();
 
 /** One database shared, holding the twelve fixture rows. The ordinary case. */
 function scriptHappyPath() {
-  notionScript = {
+  notion.script = {
     "/v1/search": () => [
       200,
       { results: [{ object: "data_source", id: DATA_SOURCE_ID }] },
@@ -145,12 +120,12 @@ before(async () => {
 
 after(() => {
   server?.close();
-  globalThis.fetch = realFetch;
+  notion.restore();
   rmSync(DB_PATH, { force: true });
 });
 
 beforeEach(() => {
-  notionCalls = [];
+  notion.calls = [];
   scriptHappyPath();
   const db = new DatabaseSync(DB_PATH);
   db.exec("DELETE FROM connection");
@@ -214,7 +189,7 @@ test("the data source is located by search, not read from config", async () => {
 
   await batches();
 
-  const search = notionCalls.find((call) => call.path === "/v1/search");
+  const search = notion.calls.find((call) => call.path === "/v1/search");
   assert.equal(search.method, "POST");
   assert.equal(search.auth, "Bearer ntn_live_token");
   assert.equal(search.version, "2026-03-11");
@@ -223,9 +198,9 @@ test("the data source is located by search, not read from config", async () => {
     value: "data_source",
   });
 
-  const query = notionCalls.find((call) => call.path === QUERY_PATH);
+  const query = notion.calls.find((call) => call.path === QUERY_PATH);
   assert.ok(query, "the query went to the data source the search returned");
-  const wire = JSON.stringify(notionCalls);
+  const wire = JSON.stringify(notion.calls);
   for (const fromEnv of [
     "db-from-the-environment",
     "ds-from-the-environment",
@@ -239,7 +214,7 @@ test("the query filters on CRM status as a status property", async () => {
 
   await batches();
 
-  const query = notionCalls.find((call) => call.path === QUERY_PATH);
+  const query = notion.calls.find((call) => call.path === QUERY_PATH);
   assert.deepEqual(query.body.filter, {
     property: "CRM status",
     status: { equals: TARGET_STATUS },
@@ -251,7 +226,7 @@ test("every ready row is counted, however many pages Notion answers in", async (
   const ready = pages.filter(
     (page) => page.properties["CRM status"].status.name === TARGET_STATUS,
   );
-  notionScript[QUERY_PATH] = (body) =>
+  notion.script[QUERY_PATH] = (body) =>
     body.start_cursor
       ? [200, { results: ready.slice(2), has_more: false, next_cursor: null }]
       : [
@@ -266,7 +241,7 @@ test("every ready row is counted, however many pages Notion answers in", async (
     EXPECTED_MATCHES,
   );
   assert.equal(
-    notionCalls.filter((call) => call.path === QUERY_PATH).length,
+    notion.calls.filter((call) => call.path === QUERY_PATH).length,
     2,
   );
 });
@@ -275,7 +250,7 @@ test("every ready row is counted, however many pages Notion answers in", async (
 
 test("a connection that shared no databases says so, rather than answering nothing", async () => {
   connect();
-  notionScript["/v1/search"] = () => [200, { results: [] }];
+  notion.script["/v1/search"] = () => [200, { results: [] }];
 
   const res = await batches();
 
@@ -284,7 +259,7 @@ test("a connection that shared no databases says so, rather than answering nothi
   assert.equal(body.error.code, "not_connected");
   assert.equal(body.error.details.reason, "no_databases");
   assert.equal(
-    notionCalls.find((call) => call.path === QUERY_PATH),
+    notion.calls.find((call) => call.path === QUERY_PATH),
     undefined,
     "there was nothing to query",
   );
@@ -297,12 +272,12 @@ test("no Connection answers not_connected", async () => {
   const body = await res.json();
   assert.equal(body.error.code, "not_connected");
   assert.deepEqual(Object.keys(body), ["error"], "one error shape");
-  assert.deepEqual(notionCalls, [], "nothing was asked of Notion");
+  assert.deepEqual(notion.calls, [], "nothing was asked of Notion");
 });
 
 test("a read-side Notion failure answers notion_failed", async () => {
   connect();
-  notionScript[QUERY_PATH] = () => [500, { code: "internal_server_error" }];
+  notion.script[QUERY_PATH] = () => [500, { code: "internal_server_error" }];
 
   const res = await batches();
 
@@ -312,7 +287,7 @@ test("a read-side Notion failure answers notion_failed", async () => {
 
 test("a failing search answers notion_failed too", async () => {
   connect();
-  notionScript["/v1/search"] = () => [503, { code: "service_unavailable" }];
+  notion.script["/v1/search"] = () => [503, { code: "service_unavailable" }];
 
   const res = await batches();
 
@@ -323,7 +298,7 @@ test("a failing search answers notion_failed too", async () => {
 test("a wrong property key surfaces as a validation error, not zero rows", async () => {
   connect();
   // What Notion answers a filter whose key does not match the property's type.
-  notionScript[QUERY_PATH] = () => [
+  notion.script[QUERY_PATH] = () => [
     400,
     { object: "error", status: 400, code: "validation_error" },
   ];
@@ -336,7 +311,7 @@ test("a wrong property key surfaces as a validation error, not zero rows", async
 
 test("a token Notion rejects on sight answers not_connected", async () => {
   connect();
-  notionScript[QUERY_PATH] = () => [401, { code: "unauthorized" }];
+  notion.script[QUERY_PATH] = () => [401, { code: "unauthorized" }];
 
   const res = await batches();
 

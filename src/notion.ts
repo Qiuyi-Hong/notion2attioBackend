@@ -1,7 +1,7 @@
 /**
- * The Notion calls the connection itself needs. Everything the pipeline reads
- * and writes lands elsewhere; this file is the OAuth legs and one look at what
- * the grant actually covers.
+ * Every Notion call the app makes from a route: the OAuth legs, the search
+ * that finds what the grant covers, and the read behind `GET /api/batches`.
+ * The pipeline's own reads and writes belong to the graph's nodes, not here.
  *
  * Facts from `docs/notion-oauth-connection.md` and `docs/research/notion-oauth.md`:
  * Basic auth on the OAuth endpoints, `Notion-Version` required on all of them,
@@ -67,11 +67,11 @@ export async function exchangeCode(code: string): Promise<Connection> {
 }
 
 /**
- * Every read-side call reads a bad status the same way, and the contract fixes
+ * Both read-side calls read a bad status the same way, and the contract fixes
  * both answers: a dead token is `not_connected`, because the repair is
  * authorising again; anything else Notion says is `notion_failed`.
  */
-async function assertReadable(res: Response, what: string): Promise<void> {
+async function throwForStatus(res: Response, clause: string): Promise<void> {
   if (res.ok) return;
   if (res.status === 401) {
     throw new ApiError(
@@ -84,7 +84,7 @@ async function assertReadable(res: Response, what: string): Promise<void> {
   throw new ApiError(
     "notion_failed",
     502,
-    `Notion answered ${res.status} when ${what}.`,
+    `Notion answered ${res.status} when ${clause}.`,
   );
 }
 
@@ -108,32 +108,28 @@ export async function findSharedDataSource(
     filter: { property: "object", value: "data_source" },
     page_size: 1,
   });
-  await assertReadable(res, "asked what the grant covers");
+  await throwForStatus(res, "asked what the grant covers");
   const body = (await res.json()) as { results?: { id?: string }[] };
   return body.results?.[0]?.id;
 }
 
-/** The one property of a row this file's caller reads. */
-export interface ReadyRow {
-  properties?: { Batch?: { select?: { name?: string } | null } };
-}
-
 /**
- * Every row waiting for the CRM, whichever batch it is in — the status leg of
- * `docs/notion-source-database.md`'s filter, on its own.
+ * The `Batch` of every row waiting for the CRM — the status leg of
+ * `docs/notion-source-database.md`'s filter, on its own. Notion's page shape
+ * stops here: the caller counts names.
  *
  * `CRM status` is a **status** property, so the filter key is `status`. Wrong
- * key, wrong type: Notion answers `validation_error`, which surfaces here as
+ * key, wrong type: Notion answers `validation_error`, which surfaces as
  * `notion_failed` rather than silently as zero rows.
  *
  * Notion pages the answer and the counts are the payload, so the cursor is
  * followed to the end; a truncated count would simply be wrong.
  */
-export async function queryReadyRows(
+export async function queryReadyBatches(
   accessToken: string,
   dataSourceId: string,
-): Promise<ReadyRow[]> {
-  const rows: ReadyRow[] = [];
+): Promise<string[]> {
+  const batches: string[] = [];
   let cursor: string | undefined;
   do {
     const res = await notionPost(
@@ -145,16 +141,20 @@ export async function queryReadyRows(
         ...(cursor && { start_cursor: cursor }),
       },
     );
-    await assertReadable(res, "asked for the rows ready for the CRM");
+    await throwForStatus(res, "asked for the rows ready for the CRM");
     const body = (await res.json()) as {
-      results?: ReadyRow[];
+      results?: { properties?: { Batch?: { select?: { name?: string } } } }[];
       has_more?: boolean;
       next_cursor?: string | null;
     };
-    rows.push(...(body.results ?? []));
+    for (const row of body.results ?? []) {
+      // `Batch` is a select, and an unset one belongs to no run.
+      const name = row.properties?.Batch?.select?.name;
+      if (name) batches.push(name);
+    }
     cursor = body.has_more ? (body.next_cursor ?? undefined) : undefined;
   } while (cursor);
-  return rows;
+  return batches;
 }
 
 /**

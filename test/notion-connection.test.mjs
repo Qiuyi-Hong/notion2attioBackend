@@ -1,10 +1,9 @@
 /**
  * The Notion connection, end to end through the real Express app (#49).
  *
- * Notion is faked at the network — `globalThis.fetch` is swapped for one that
- * answers `api.notion.com` from a script and delegates everything else to the
- * real one, so the app under test is the app that ships. No seam exists in
- * `src/` because a test wanted it.
+ * Notion is faked at the network by `./notion-fake.mjs`, so the app under
+ * test is the app that ships. No seam exists in `src/` because a test
+ * wanted it.
  *
  * `docs/notion-oauth-connection.md` and `docs/http-contract.md` are the
  * authorities for the URLs, the payload shapes and the error shape.
@@ -18,7 +17,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+
 import { fileURLToPath } from "node:url";
+
+import { fakeNotion } from "./notion-fake.mjs";
 
 const DB_PATH = join(tmpdir(), `notion2attio-${randomUUID()}.sqlite`);
 const FRONTEND_ORIGIN = "http://localhost:5173";
@@ -51,38 +53,11 @@ const TOKEN_RESPONSE = {
 
 // ── The Notion fake ────────────────────────────────────────────────────────
 
-const realFetch = globalThis.fetch;
-/** Calls Notion saw, oldest first: `{ path, method, auth, body }`. */
-let notionCalls = [];
-/** `{ [path]: (body) => [status, json] }`, replaced per test. */
-let notionScript = {};
-
-globalThis.fetch = async (input, init) => {
-  const url = new URL(String(input instanceof Request ? input.url : input));
-  if (url.origin !== "https://api.notion.com") return realFetch(input, init);
-  const body = init?.body ? JSON.parse(init.body) : undefined;
-  notionCalls.push({
-    path: url.pathname,
-    method: init?.method,
-    auth: init?.headers?.Authorization,
-    version: init?.headers?.["Notion-Version"],
-    body,
-  });
-  const reply = notionScript[url.pathname];
-  assert.ok(
-    reply,
-    `the app called ${url.pathname}, which this test did not script`,
-  );
-  const [status, json] = reply(body);
-  return new Response(JSON.stringify(json), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-};
+const notion = fakeNotion();
 
 /** Consent granted, one data source shared. The ordinary case. */
 function scriptHappyPath() {
-  notionScript = {
+  notion.script = {
     "/v1/oauth/token": () => [200, TOKEN_RESPONSE],
     "/v1/search": () => [
       200,
@@ -106,12 +81,12 @@ before(async () => {
 
 after(() => {
   server?.close();
-  globalThis.fetch = realFetch;
+  notion.restore();
   rmSync(DB_PATH, { force: true });
 });
 
 beforeEach(() => {
-  notionCalls = [];
+  notion.calls = [];
   scriptHappyPath();
   const db = new DatabaseSync(DB_PATH);
   db.exec(
@@ -183,7 +158,7 @@ test("the callback exchanges the code, stores the Connection and returns to the 
   assert.equal(outcomeOf(res), "connected");
   assert.deepEqual(storedConnection(), TOKEN_RESPONSE);
 
-  const exchange = notionCalls.find((c) => c.path === "/v1/oauth/token");
+  const exchange = notion.calls.find((c) => c.path === "/v1/oauth/token");
   assert.equal(exchange.method, "POST");
   assert.equal(
     exchange.auth,
@@ -201,12 +176,12 @@ test("the callback exchanges the code, stores the Connection and returns to the 
 test("the pending row expires on use: the same state is refused twice", async () => {
   const state = await startAuthorisation();
   await get(`/auth/notion/callback?code=the-code&state=${state}`);
-  notionCalls = [];
+  notion.calls = [];
 
   const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
 
   assert.equal(outcomeOf(res), "expired");
-  assert.deepEqual(notionCalls, [], "a refused callback exchanges nothing");
+  assert.deepEqual(notion.calls, [], "a refused callback exchanges nothing");
 });
 
 test("a pending row older than ten minutes is refused", async () => {
@@ -241,11 +216,11 @@ test("cancelling out of consent stores nothing and says so", async () => {
 
   assert.equal(outcomeOf(res), "cancelled");
   assert.equal(storedConnection(), undefined);
-  assert.deepEqual(notionCalls, []);
+  assert.deepEqual(notion.calls, []);
 });
 
 test("granting access while ticking no databases connects, and says so", async () => {
-  notionScript["/v1/search"] = () => [200, { results: [] }];
+  notion.script["/v1/search"] = () => [200, { results: [] }];
   const state = await startAuthorisation();
 
   const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
@@ -256,7 +231,7 @@ test("granting access while ticking no databases connects, and says so", async (
 });
 
 test("a token Notion rejects on sight is reported as expired, not as a failure", async () => {
-  notionScript["/v1/search"] = () => [401, { code: "unauthorized" }];
+  notion.script["/v1/search"] = () => [401, { code: "unauthorized" }];
   const state = await startAuthorisation();
 
   const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
@@ -272,7 +247,7 @@ test("a token Notion rejects on sight is reported as expired, not as a failure",
 test("a grant we cannot look into is stored nowhere", async () => {
   // The look happens before the row is written, so an unreadable answer
   // leaves the file exactly as `failed` promises: untouched.
-  notionScript["/v1/search"] = () => [500, { code: "internal_server_error" }];
+  notion.script["/v1/search"] = () => [500, { code: "internal_server_error" }];
   const state = await startAuthorisation();
 
   const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
@@ -286,7 +261,7 @@ test("a grant we cannot look into is stored nowhere", async () => {
 });
 
 test("a token exchange Notion refuses reports a failure", async () => {
-  notionScript["/v1/oauth/token"] = () => [400, { error: "invalid_grant" }];
+  notion.script["/v1/oauth/token"] = () => [400, { error: "invalid_grant" }];
   const state = await startAuthorisation();
 
   const res = await get(`/auth/notion/callback?code=stale&state=${state}`);
@@ -347,13 +322,13 @@ test("the Connection survives a process restart", async () => {
 test("deleting the connection revokes the grant and reports nothing stranded", async () => {
   const state = await startAuthorisation();
   await get(`/auth/notion/callback?code=the-code&state=${state}`);
-  notionCalls = [];
+  notion.calls = [];
 
   const res = await fetch(`${base}/api/connection`, { method: "DELETE" });
 
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { disconnected: true, strandedRuns: [] });
-  const revoke = notionCalls.find((c) => c.path === "/v1/oauth/revoke");
+  const revoke = notion.calls.find((c) => c.path === "/v1/oauth/revoke");
   assert.deepEqual(revoke.body, { token: "ntn_live_token" });
   assert.equal(storedConnection(), undefined);
 });
@@ -393,7 +368,7 @@ test("deleting a connection that is not there answers not_connected", async () =
 });
 
 test("a grant Notion has already forgotten still disconnects", async () => {
-  notionScript["/v1/oauth/revoke"] = () => [401, { code: "unauthorized" }];
+  notion.script["/v1/oauth/revoke"] = () => [401, { code: "unauthorized" }];
   const state = await startAuthorisation();
   await get(`/auth/notion/callback?code=the-code&state=${state}`);
 

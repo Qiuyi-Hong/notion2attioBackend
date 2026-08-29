@@ -66,11 +66,15 @@ Both `/auth` routes are browser navigations, so the callback's answer is the URL
 | --- | --- |
 | `GET /api/batches` | `[{ batch: "2026-W34", ready: 8 }]` — the distinct `Batch` values among `CRM status = Ready for CRM` rows, with counts. |
 
-This costs one Notion query and earns three things: the pre-run screen, an honest weekly-repeat story for [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13), and proof that the filter runs rather than sitting hardcoded in config.
+This costs one search and one query — a second query per further hundred ready rows, since the counts are the payload and a truncated one would be wrong — and earns three things: the pre-run screen, an honest weekly-repeat story for [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13), and proof that the filter runs rather than sitting hardcoded in config.
 
 The route reads the **status leg alone** — `CRM status = Ready for CRM` — and groups what comes back by `Batch`. `CRM status` is a status property and `Batch` is a select ([`notion-source-database.md`](./notion-source-database.md)); a filter key that does not match the property's type is a `validation_error` from Notion, which leaves here as `notion_failed`, never as zero rows.
 
 **The data source is found by searching**, with the `data_source` object filter, on every request. No data-source identifier is read from config — `NOTION_DATA_SOURCE_ID` seeds the fixture and is not request-time configuration. That is what keeps the consent screen load-bearing: the grant decides what is readable.
+
+**The first data source the search returns wins.** A grant reaching several is read as though it reached one, and choosing between them would mean the picker naming a database as well as a batch — which no surface asks for. Named here so it is a known ceiling rather than a surprise.
+
+Batches come back **most recent week first**. ISO weeks are zero-padded, so this is a plain descending string sort, and it puts the week a reviewer opened the app to run at the top of a `<select>` that is often one option long.
 
 Four situations, and only the first answers with a list:
 
@@ -81,7 +85,9 @@ Four situations, and only the first answers with a list:
 | A Connection whose grant reaches no data source | `409 not_connected`, `details: { reason: "no_databases" }` |
 | Notion refuses the search or the query | `502 notion_failed` |
 
-The shared-nothing case is **not** an empty list: an empty list means *nothing is waiting this week*, which is what a healthy workspace with everything imported looks like. It carries the same `no_databases` name the connect banner already renders, under the `not_connected` code so the closed list stays closed. `details.reason` is `expired` when the grant is dead and `no_databases` when it covers nothing — the two repairs differ, and the banner names them apart.
+Settled on [#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50), which asked for an answer here and did not name one. The shared-nothing case is **not** an empty list: an empty list means *nothing is waiting this week*, which is what a healthy workspace with everything imported looks like. It carries the same `no_databases` name the connect banner already renders, under the `not_connected` code so the closed list stays closed.
+
+A stored Connection answering `not_connected` is not a new contortion: [#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49) already answers it, with `details: { reason: "expired" }`, for a grant Notion has stopped honouring. Both say the same thing — *there is a row in the file, and it will not get you a batch* — and `details.reason` is what separates the two repairs. The workspace name for the banner comes from `GET /api/connection`, as it always has; this error is not asked to carry it.
 
 ### Runs
 

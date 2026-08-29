@@ -45,9 +45,9 @@ router.get("/notion/callback", async (req, res) => {
     // Asked before the row is written, so `expired` and `failed` can both
     // mean what the contract says they mean: nothing was stored.
     const connection = await exchangeCode(code);
-    const shared = await findSharedDataSource(connection.access_token);
+    const dataSource = await findSharedDataSource(connection.access_token);
     saveConnection(connection);
-    return res.redirect(backToApp(shared ? "connected" : "no_databases"));
+    return res.redirect(backToApp(dataSource ? "connected" : "no_databases"));
   } catch (thrown) {
     const expired =
       thrown instanceof ApiError && thrown.code === "not_connected";
