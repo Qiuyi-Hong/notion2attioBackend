@@ -20,6 +20,7 @@
  */
 
 import * as z from "zod";
+import { Flag } from "./flags.ts";
 import type { SourceRow } from "./notion.ts";
 
 /**
@@ -33,6 +34,7 @@ export const CompanyCandidate = z.object({
   domain: z.string(),
   segment: z.string(),
   primaryLocation: z.string(),
+  flags: z.array(Flag).default(() => []),
 });
 export type CompanyCandidate = z.infer<typeof CompanyCandidate>;
 
@@ -46,6 +48,7 @@ export const PersonCandidate = z.object({
   jobTitle: z.string(),
   linkedIn: z.string(),
   leadSource: z.string(),
+  flags: z.array(Flag).default(() => []),
 });
 export type PersonCandidate = z.infer<typeof PersonCandidate>;
 
@@ -54,6 +57,7 @@ export const DealCandidate = z.object({
   id: z.string(),
   companyId: z.string(),
   owner: z.string(),
+  flags: z.array(Flag).default(() => []),
 });
 export type DealCandidate = z.infer<typeof DealCandidate>;
 
@@ -146,10 +150,16 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         domain,
         segment: text(row, "Segment"),
         primaryLocation: text(row, "HQ"),
+        flags: [],
       });
       // The first row of an account settles the values its siblings share —
       // and the one they disagree on, `Lead source`, is on the Person.
-      deals.push({ id: `deal:${key}`, companyId, owner: text(row, "Owner") });
+      deals.push({
+        id: `deal:${key}`,
+        companyId,
+        owner: text(row, "Owner"),
+        flags: [],
+      });
     }
 
     const email = text(row, "Work email");
@@ -168,6 +178,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         jobTitle: text(row, "Job title"),
         linkedIn: text(row, "LinkedIn"),
         leadSource: text(row, "Lead source"),
+        flags: [],
       });
     }
   }

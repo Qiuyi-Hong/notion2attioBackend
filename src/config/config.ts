@@ -12,6 +12,13 @@ interface Config {
    * runs, and the checkpoints the graph writes.
    */
   databasePath: string;
+  /**
+   * The `Deal stage` every Deal is proposed under. No Notion column holds one
+   * and we never read Attio, so the value has to come from somewhere the
+   * reviewer can see and change — a batch flag, not a constant in the emitter
+   * (#18). `Lead` is Attio's own Deals template's example value.
+   */
+  dealStage: string;
   notion: {
     clientId: string;
     clientSecret: string;
@@ -25,6 +32,7 @@ const config: Config = {
   nodeEnv: process.env.NODE_ENV || "development",
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
   databasePath: process.env.DATABASE_PATH || "data/notion2attio.sqlite",
+  dealStage: process.env.DEAL_STAGE || "Lead",
   notion: {
     clientId: process.env.NOTION_OAUTH_CLIENT_ID || "",
     clientSecret: process.env.NOTION_OAUTH_CLIENT_SECRET || "",
