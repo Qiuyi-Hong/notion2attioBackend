@@ -3,9 +3,11 @@
  * No LangGraph Platform, no `@langchain/langgraph-sdk`: the run identifier is
  * the `thread_id` and the checkpoint file is the whole read model.
  *
- * Four nodes so far — read the batch, propose candidates from it, check them,
- * then pause for the Reviewer. `check` holds the deterministic rules and the
- * one model call the pipeline makes, which may only raise a flag (ADR-0002).
+ * Seven nodes — read the batch, propose candidates from it, check them, pause
+ * for the Reviewer, make the files, pause again for the confirmation, and write
+ * `Imported` back to Notion. `check` holds the deterministic rules and the one
+ * model call the pipeline makes, which may only raise a flag (ADR-0002);
+ * `writeback` holds the only side effect the system has (ADR-0007).
  *
  * `docs/research/langgraph-hitl.md` is where the API facts below were verified.
  */
@@ -36,6 +38,7 @@ import { findSharedDataSource, queryBatchRows } from "./notion.ts";
 import { applyDecision, type Decision, wasRefused } from "./review.ts";
 import { noticesOf, Screening, screenNotes } from "./screener.ts";
 import { readConnection } from "./store.ts";
+import { type Confirmation, WriteBack, writeBackOf } from "./writeback.ts";
 
 /**
  * Declared with the Zod state schema rather than the older annotation root.
@@ -86,6 +89,21 @@ export const State = new StateSchema({
     .array(HandoffFile)
     .nullable()
     .default(() => null),
+  /**
+   * What the write-back left behind, and `null` until one has been attempted
+   * (#57). A non-empty `failed` is the whole of the retry panel's input: a run
+   * with failures is paused at the confirmation interrupt, which is the
+   * definition of `awaiting_confirmation`, so the retry needs no state of its
+   * own beside this.
+   */
+  writeBack: WriteBack.nullable().default(() => null),
+  /**
+   * The reviewer gave up on marking Notion for a bundle that did reach Attio.
+   * Terminal, and deliberately **not** `done`: a `done` run releases its batch,
+   * and these rows still read `Ready for CRM` with their deals already in Attio
+   * (ADR-0007).
+   */
+  abandoned: z.boolean().default(() => false),
 });
 
 const read: GraphNode<typeof State> = async (state) => {
@@ -165,15 +183,31 @@ const emit: GraphNode<typeof State> = (state) => ({
  * the batch landed in Attio — which may be hours later, at a different
  * machine.
  *
- * What the confirmation *does* — the write-back, its retry and its
- * abandonment — is #57's. This node holds the pause it happens at, because the
- * run reaches `awaiting_confirmation` as soon as the files **exist**, not when
- * something is finally built to answer it.
+ * The run reaches `awaiting_confirmation` as soon as the files **exist**, not
+ * when they are downloaded: a download is a repeatable `GET` that moves the run
+ * nowhere.
+ *
+ * It is reached a second time after a partial write-back, carrying the failure
+ * list — which is what turns the confirmation panel into a retry panel, with
+ * no second pause and no second route. Like `review`, it holds the
+ * `interrupt()` and nothing else: an interrupted node re-runs from the top, so
+ * a side effect here would be charged again on every resume.
  */
-const confirm: GraphNode<typeof State> = () => {
-  interrupt({ kind: "confirm" });
-  return {};
+const confirm: GraphNode<typeof State> = (state) => {
+  const answer = interrupt({
+    kind: "confirm",
+    writeBack: state.writeBack,
+  }) as Confirmation;
+  return "abandoned" in answer ? { abandoned: true } : {};
 };
+
+/**
+ * The write-back, and the only side effect in the system (#57). The whole of it
+ * lives in `writeback.ts`; the node is the seam it runs at.
+ */
+const writeback: GraphNode<typeof State> = async (state) => ({
+  writeBack: await writeBackOf(state),
+});
 
 // `SqliteSaver` opens the file eagerly, and `store.ts` cannot be relied on to
 // have created the directory first.
@@ -192,6 +226,7 @@ export const graph = new StateGraph(State)
   .addNode("review", review)
   .addNode("emit", emit)
   .addNode("confirm", confirm)
+  .addNode("writeback", writeback)
   .addEdge(START, "read")
   .addEdge("read", "transform")
   .addEdge("transform", "check")
@@ -213,5 +248,26 @@ export const graph = new StateGraph(State)
     ["review", "emit"],
   )
   .addEdge("emit", "confirm")
-  .addEdge("confirm", END)
+  /**
+   * Abandoning ends the run without writing anything: the bundle reached
+   * Attio and the reviewer is giving up on marking Notion. Confirming is the
+   * only way into the one node that writes.
+   */
+  .addConditionalEdges(
+    "confirm",
+    (state) => (state.abandoned ? END : "writeback"),
+    [END, "writeback"],
+  )
+  /**
+   * Back to the pause while any handed-off row is still unwritten — the whole
+   * of the retry mechanism, and the reason there is no second pause and no
+   * second route. **Retry is this same edge**, re-entered by the same payload
+   * on the same route, and re-entering costs nothing because the node
+   * re-queries Notion before it writes (ADR-0007).
+   */
+  .addConditionalEdges(
+    "writeback",
+    (state) => (state.writeBack?.failed.length ? "confirm" : END),
+    ["confirm", END],
+  )
   .compile({ checkpointer });

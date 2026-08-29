@@ -378,6 +378,19 @@ test("a grant Notion has already forgotten still disconnects", async () => {
 
 // ── The refresh loop that must not exist ───────────────────────────────────
 
+/**
+ * The write-back is the one file allowed a `setTimeout`, and it is not a loop:
+ * it paces its sequential writes at ~3/s and waits out a `429`'s `Retry-After`
+ * (ADR-0007). Both are awaited inside the node the reviewer's own request is
+ * waiting on, so nothing there outlives the request and nothing there is
+ * scheduled. The `refresh_token` ban and the ban on `setInterval` stay
+ * absolute, because those are what a refresh loop is made of.
+ */
+const PACED = new Set(["writeback.ts"]);
+
+/** The path relative to `src/`, so the allowlist names one file and not a name. */
+const under = (root, path) => path.slice(root.length);
+
 test("no refresh loop exists anywhere in the codebase", () => {
   const root = fileURLToPath(new URL("../src/", import.meta.url));
   const walk = (dir) =>
@@ -389,6 +402,8 @@ test("no refresh loop exists anywhere in the codebase", () => {
   for (const path of walk(root)) {
     const source = readFileSync(path, "utf8");
     assert.ok(!/refresh_token/.test(source), `${path} reads the refresh token`);
-    assert.ok(!/setInterval|setTimeout/.test(source), `${path} schedules work`);
+    assert.ok(!/setInterval/.test(source), `${path} schedules a loop`);
+    if (PACED.has(under(root, path))) continue;
+    assert.ok(!/setTimeout/.test(source), `${path} schedules work`);
   }
 });
