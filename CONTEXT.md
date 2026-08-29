@@ -16,7 +16,7 @@ There is one connection at a time. Without it there is no batch to read: the con
 
 One pass of the pipeline over one batch — read the batch, propose candidates, pause for the Reviewer, make the files, pause again, and write the outcome back to Notion.
 
-A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A batch may be attempted by more than one run — a run that ends without a confirmed handoff leaves the batch to be picked up again.
+A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A run is not *only* reachable that way, though: a run that nobody remembers can still be found, because a run whose second pause is never answered leaves work already done in Attio and no record of it in Notion. A batch may be attempted by more than one run — a run that ends without a confirmed handoff leaves the batch to be picked up again.
 
 ## Source row
 
@@ -72,6 +72,14 @@ These replace the working sheet's `READY` and `CHECK`. `READY` becomes `Clear`. 
 ## Reviewer
 
 The one person who works through a batch's flags, with full authority to decide. The working sheet's escalation — *"if a match is uncertain, leave the row in CHECK and ask Maya"* — has no counterpart here; it existed because a spreadsheet cannot record that the question was asked and answered.
+
+## Reviewer edit
+
+A value the reviewer changes by hand while working a batch. An edit is not a correction applied to the output — it is a new input.
+
+An edit therefore goes back through the pipeline's checks, exactly as the value it replaces did. It can clear a flag, and it can raise a new one; what it can never do is bypass a check. Editing a flagged value is not a way to answer the flag.
+
+This is the reviewer-facing counterpart of the rule on silent repairs. The pipeline may not assert a fact it does not hold, and the reviewer may not assert one either without the pipeline looking at it.
 
 ## Proven duplicate
 
