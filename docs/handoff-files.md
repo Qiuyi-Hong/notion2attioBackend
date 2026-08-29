@@ -122,8 +122,16 @@ costs nothing.
 for the batch, defaulting to `Lead`. Both are confirmed by the single batch flag
 from #18. `Deal value` has no source in Notion and is not emitted.
 
-A deal whose company has no exported person — Tern Mobility — still ships, with
-an empty `Associated people email addresses` cell.
+A deal whose company has no exported person — Tern Mobility — is **withheld**,
+not shipped with an empty `Associated people email addresses` cell. That
+reverses what this document first said here, and
+[ADR-0005](adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md) is
+where it was reversed: a Deal always creates in Attio and has no undo, so one
+attached to nobody is the single mistake in this bundle that nobody can take
+back. The Company still ships, in `1-companies.csv`, because a Company upserts
+on its domain and loses nothing by going early
+([ADR-0003](adr/0003-a-company-candidate-is-never-dropped-with-its-people.md)).
+The deal returns when the batch is re-run with the contact completed.
 
 ## `1-companies.csv`, and why it exists at all
 
@@ -192,7 +200,7 @@ One person candidate held.
 | ----------------- | ---- | --------------------------------------------------- |
 | `1-companies.csv` | 1    | Tern Mobility                                       |
 | `2-people.csv`    | 7    | 8 source rows minus the held Tern Mobility contact  |
-| `3-deals.csv`     | 7    | one per company, Brightyard carrying both contacts  |
+| `3-deals.csv`     | 6    | one per company, less the withheld Tern Mobility deal |
 
 Brightyard is the case worth reading in the example: two source rows, two
 different website spellings, one repaired domain, one company row implied, two
@@ -205,6 +213,12 @@ quoted and comma-space separated, exactly as Attio's template shows.
 The example files were generated from `data/notion-qualified-accounts-w34.csv`
 and verified: valid UTF-8, no BOM, CRLF only with zero bare LF, and no trailing
 newline, in all three CSVs. `npm test` asserts those four rules against the
-committed files, so the exhibit cannot drift from the contract unnoticed. They
-are illustrative output committed as a fixture — the emitter that produces them
-for real is build work, not settled here.
+committed files, so the exhibit cannot drift from the contract unnoticed.
+
+The emitter that produces them for real is built
+([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56), `src/emit.ts`),
+and `test/handoff.test.mjs` runs the W34 batch end to end and compares what it
+emits against the committed files **byte for byte** — then asserts the four
+byte rules on the emitted bytes **separately**, so a future fixture regression
+cannot pass by matching a wrong file. The exhibit is no longer illustrative: it
+is the golden the emitter is held to.

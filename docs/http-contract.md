@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), and the reviewer's decision document answering them ([#54](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/54)), are built. The second pause and the file download are not: `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), the reviewer's decision document answering them ([#54](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/54)), and the handoff bundle with its download ([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)), are built. What the second pause *does* is not: `/confirm` arrives with the ticket that gives it something to carry ([#57](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/57)). The pause itself exists, because a run reaches `awaiting_confirmation` as soon as the files exist.
 
 ## What was already fixed before this ticket
 
@@ -99,7 +99,7 @@ A stored Connection answering `not_connected` is not a new contortion: [#49](htt
 | `POST /api/runs/:runId/review` | The reviewer's decision document. |
 | `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio — and, on a retry, the attestation that the write-back is being abandoned. |
 | `POST /api/runs/:runId/continue` | Restarts a stopped run — `stalled`, or `failed` in the process that saw it throw — from its last checkpoint. |
-| `GET /api/runs/:runId/files/:fileId` | The CSV bytes, from the checkpoint. |
+| `GET /api/runs/:runId/files/:fileId` | One file of the handoff bundle, from the checkpoint. |
 | `DELETE /api/runs/:runId` | Cancels the run and releases its batch. After the files exist, this is an attestation — see below. |
 
 `POST /api/runs` returns `202` rather than blocking, because the run reads Notion and then makes up to eight model calls ([#9](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/9)) before it first pauses — plausibly 20–40 seconds. Returning the identifier immediately means the run's URL is shareable before the work finishes, and a reload during startup cannot orphan a run.
@@ -143,7 +143,9 @@ We persist no failure record of our own, so **after a restart a `failed` run rea
 
 The run reaches `awaiting_confirmation` **as soon as the files exist**, not when they are downloaded. A download is a repeatable `GET`.
 
-Until [#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56) puts `emit` after `review`, an answered review runs the graph to its end and the run reads `done` — which is what "the graph ran to the end" means and is read off the checkpoint, not stored. It is a temporary overstatement of `done`'s meaning, and it temporarily releases the batch a run has answered. Nothing has reached Attio yet for a second run to duplicate, and `emit` closes it by standing between the two.
+[#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56) put `emit` after `review`, so an answered review no longer runs the graph to its end: it makes the files and stops at the confirmation pause. `review` and `confirm` are the two nodes that interrupt, and the status is told apart by the paused task's name.
+
+**The batch refuses to export while any Warn is unanswered** (`CONTEXT.md`, *Handoff bundle*), and that refusal is the run **staying at `awaiting_review`** rather than an error. A decision answering only some of them is accepted, applied and answered `200` with the ledger it produced — the unanswered flag is already on screen there, which is the only place its answer can be given. A Stop is not in this reading: an uncleared Stop makes its candidate Held, so it removes a row from the files instead of blocking them.
 
 `abandoned` is terminal but is **not** `done`. The distinction is load-bearing against [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13)'s one-live-run-per-batch guard ([PR #39](https://github.com/Qiuyi-Hong/notion2attioBackend/pull/39)), under which only a `done` run releases its batch: an abandoned run leaves rows reading `Ready for CRM` whose deals are **already in Attio**, so releasing the batch would let the next run emit those deals a second time. The batch stays reserved until a person sets those rows to `Imported` in Notion by hand and deletes the run — `DELETE /api/runs/:runId` is the explicit release. See [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md).
 
@@ -273,9 +275,23 @@ Full reasoning: [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.m
 
 ### File download — `GET /api/runs/:runId/files/:fileId`
 
-Serves the **stored bytes from the checkpoint**. It never regenerates the file, so the bytes downloaded are provably the bytes the reviewer approved.
+Serves the **stored bytes from the checkpoint**. It never regenerates the file, so the bytes downloaded are provably the bytes the reviewer approved. It is a repeatable `GET`: downloading twice returns identical bytes and moves the run nowhere.
 
-`Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment`. The bytes themselves are [#12](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/12)'s: UTF-8, no BOM, **CRLF**, comma, RFC-4180 quoting, no trailing newline.
+`Content-Disposition: attachment`, always — a bundle read in a browser tab is a bundle that never reached the folder the reviewer imports from.
+
+The **content type is per file**, read off its name. The bundle is one ZIP named for the batch ([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)), and `files` lists it alongside each of its members, so a reviewer who wants one file can take one:
+
+| filename | `Content-Type` |
+| --- | --- |
+| `handoff-<batch>.zip` | `application/zip` |
+| `1-companies.csv`, `2-people.csv`, `3-deals.csv` | `text/csv; charset=utf-8` |
+| `handoff-notes.md` | `text/markdown; charset=utf-8` |
+
+The notes file is Markdown and is served as Markdown deliberately. It is not a CSV precisely so that neither an auto-mapper nor a tired human offers it to Attio's import screen, and serving it as `text/csv` would undo that in one header.
+
+The CSV bytes themselves are [#12](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/12)'s: UTF-8, no BOM, **CRLF**, comma, RFC-4180 quoting, no trailing newline.
+
+An unknown `fileId` under a known run is `404 no_such_file` — a real lookup miss, never an empty download.
 
 ## Validating untrusted input
 
@@ -313,6 +329,7 @@ One shape, one closed list of codes.
 | `not_connected` | `409` |
 | `wrong_workspace` | `409` |
 | `no_such_run` | `404` |
+| `no_such_file` | `404` |
 | `wrong_stage` | `409` |
 | `batch_in_progress` | `409` |
 | `invalid_payload` | `400` |

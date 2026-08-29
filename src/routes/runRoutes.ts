@@ -1,9 +1,10 @@
 /**
  * `/api/runs` — starting a run, watching it move, answering its first pause,
- * and ending it.
+ * downloading what that produced, and ending it.
  *
- * The second pause (`/confirm`) and the file download are not here yet; they
- * arrive with the tickets that give them something to carry.
+ * `/confirm` is not here yet: the run reaches the second pause as soon as the
+ * files exist (#56), but what answering it *does* — the write-back, its retry
+ * and its abandonment — arrives with #57.
  *
  * `docs/http-contract.md` owns the payloads, the states and the error shape.
  */
@@ -15,6 +16,7 @@ import { Decision } from "../review.ts";
 import {
   cancelRun,
   continueRun,
+  fileFrom,
   listRuns,
   reviewRun,
   snapshotOf,
@@ -96,6 +98,47 @@ router.post("/:runId/review", async (req, res) => {
   // The ledger their decision produced, so a refusal reaches them in the same
   // answer rather than on the next poll.
   res.json(await snapshotOf(run));
+});
+
+/**
+ * Read off the filename rather than stored beside it. `handoff-notes.md` is
+ * Markdown precisely so that neither an auto-mapper nor a tired human offers
+ * it to Attio's import screen, and serving it as `text/csv` would undo that in
+ * one header.
+ */
+const CONTENT_TYPES: Record<string, string> = {
+  csv: "text/csv; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  zip: "application/zip",
+};
+
+/**
+ * One file of the handoff bundle (#56).
+ *
+ * Serves the stored bytes from the checkpoint and never regenerates them, so
+ * the bytes downloaded are provably the bytes the reviewer approved. It is a
+ * repeatable `GET`: downloading twice returns the same bytes and moves the run
+ * nowhere, which is why the run reaches `awaiting_confirmation` when the files
+ * *exist* rather than when they are fetched.
+ *
+ * The file set is the emitter's — the ZIP the reviewer carries, and each of
+ * its members, so a reviewer who wants one file can take one. `fileId` is
+ * opaque, so that set can change without touching the contract.
+ */
+router.get("/:runId/files/:fileId", async (req, res) => {
+  const run = requireRun(req.params.runId);
+  const file = await fileFrom(run.runId, req.params.fileId);
+  if (!file) throw new ApiError("no_such_file", 404, "No such file.");
+
+  const extension = file.filename.split(".").pop() ?? "";
+  res.type(CONTENT_TYPES[extension] ?? "application/octet-stream");
+  // Attachment, always: a bundle read in a browser tab is a bundle that never
+  // reached the folder the reviewer imports from.
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${file.filename}"`,
+  );
+  res.send(Buffer.from(file.content, "base64"));
 });
 
 /**

@@ -148,3 +148,5 @@ vite.config.ts.timestamp-*
 # A worktree symlinks this in; `node_modules/` with a trailing slash does
 # not match a symlink, which is how one reached a commit.
 node_modules
+
+.claude/worktrees

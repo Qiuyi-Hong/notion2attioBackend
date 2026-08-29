@@ -30,6 +30,7 @@ import {
   Repair,
 } from "./candidates.ts";
 import config from "./config/config.ts";
+import { bundleFiles, HandoffFile, unansweredWarn } from "./emit.ts";
 import { BatchFlag, checkFlags } from "./flags.ts";
 import { findSharedDataSource, queryBatchRows } from "./notion.ts";
 import { applyDecision, type Decision, wasRefused } from "./review.ts";
@@ -73,6 +74,18 @@ export const State = new StateSchema({
    * `N0` batch flag says out loud.
    */
   screening: Screening.nullable().default(() => null),
+  /**
+   * The handoff bundle once `emit` has made it — the bytes themselves, not a
+   * path to them. `null` until then.
+   *
+   * They live in the checkpoint because that is where a run's own work lives
+   * (ADR-0009), and because the download must serve what was reviewed rather
+   * than what a second run of the emitter would produce today.
+   */
+  files: z
+    .array(HandoffFile)
+    .nullable()
+    .default(() => null),
 });
 
 const read: GraphNode<typeof State> = async (state) => {
@@ -136,6 +149,32 @@ const check: GraphNode<typeof State> = async (state) => {
 const review: GraphNode<typeof State> = (state) =>
   applyDecision(state, interrupt({ kind: "review" }) as Decision);
 
+/**
+ * The files, made once (#56). Pure, and the whole of it lives in `emit.ts`.
+ *
+ * It runs here, after the review, rather than at the download: a `GET` free to
+ * regenerate them would be free to disagree with the ledger that was on
+ * screen.
+ */
+const emit: GraphNode<typeof State> = (state) => ({
+  files: bundleFiles(state),
+});
+
+/**
+ * The second pause. The files exist, and the run waits for the human to say
+ * the batch landed in Attio — which may be hours later, at a different
+ * machine.
+ *
+ * What the confirmation *does* — the write-back, its retry and its
+ * abandonment — is #57's. This node holds the pause it happens at, because the
+ * run reaches `awaiting_confirmation` as soon as the files **exist**, not when
+ * something is finally built to answer it.
+ */
+const confirm: GraphNode<typeof State> = () => {
+  interrupt({ kind: "confirm" });
+  return {};
+};
+
 // `SqliteSaver` opens the file eagerly, and `store.ts` cannot be relied on to
 // have created the directory first.
 mkdirSync(dirname(config.databasePath), { recursive: true });
@@ -151,6 +190,8 @@ export const graph = new StateGraph(State)
   .addNode("transform", transform)
   .addNode("check", check)
   .addNode("review", review)
+  .addNode("emit", emit)
+  .addNode("confirm", confirm)
   .addEdge(START, "read")
   .addEdge("read", "transform")
   .addEdge("transform", "check")
@@ -160,10 +201,17 @@ export const graph = new StateGraph(State)
    * the candidate in the ledger where the reviewer is already working — never
    * as a `400` on a response they will never see again. The ledger this leaves
    * behind is the reviewer's own work, so nothing they got right is lost.
+   *
+   * And back to it while any **Warn** is unanswered — the export gate, whose
+   * reading lives on `unansweredWarn`. The refusal is the run staying where it
+   * is, not an error: the unanswered flag is already on screen in the ledger,
+   * which is the only place its answer can be given.
    */
   .addConditionalEdges(
     "review",
-    (state) => (wasRefused(state) ? "review" : END),
-    ["review", END],
+    (state) => (wasRefused(state) || unansweredWarn(state) ? "review" : "emit"),
+    ["review", "emit"],
   )
+  .addEdge("emit", "confirm")
+  .addEdge("confirm", END)
   .compile({ checkpointer });
