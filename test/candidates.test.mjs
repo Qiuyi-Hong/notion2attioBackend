@@ -197,6 +197,53 @@ test("both Brightyard rows make one company carrying two people and one deal", a
   );
 });
 
+test("every row's research notes reach the Person they were written about", async () => {
+  const { candidates } = await reviewSnapshot();
+
+  for (const row of rows) {
+    const written = (row["Research notes"] ?? "").trim();
+    if (!written) continue;
+    const carried = candidates.people.flatMap((person) => person.notes);
+    assert.ok(
+      carried.some(
+        (note) => note.sourceId === row["Source ID"] && note.text === written,
+      ),
+      `${row["Source ID"]}'s notes reach the ledger verbatim`,
+    );
+  }
+
+  // Notes are written about a contact, so they sit on the Person alone. A
+  // Company and a Deal reach their account's notes through its People rather
+  // than holding a copy that could go stale (ADR-0004).
+  for (const candidate of [...candidates.companies, ...candidates.deals]) {
+    assert.equal(candidate.notes, undefined, "and nowhere else");
+  }
+});
+
+test("a Person two rows collapsed onto carries both rows' notes", async () => {
+  const { candidates } = await reviewSnapshot();
+
+  // Keyed on the work email, so this is the collapse the ledger has to show.
+  const byEmail = new Map();
+  for (const row of rows) {
+    const key = (row["Work email"] ?? "").trim().toLowerCase();
+    byEmail.set(key, [...(byEmail.get(key) ?? []), row]);
+  }
+
+  for (const [, shared] of byEmail) {
+    if (shared.length < 2) continue;
+    const person = candidates.people.find(
+      (one) => one.sourceId === shared[0]["Source ID"],
+    );
+    const noted = shared.filter((row) => (row["Research notes"] ?? "").trim());
+    assert.deepEqual(
+      person.notes.map((note) => note.sourceId).sort(),
+      noted.map((row) => row["Source ID"]).sort(),
+      "one entry per source row that carried notes, each naming its row",
+    );
+  }
+});
+
 test("a path and a `www.` both normalise to a bare domain", async () => {
   const withPath = rows.find((row) => /\/\/[^/]+\/.+/.test(row.Website));
   const withWww = rows.find((row) => /\/\/www\./.test(row.Website));
