@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), the reviewer's decision document answering them ([#54](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/54)), and the handoff bundle with its download ([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)), are built. What the second pause *does* is not: `/confirm` arrives with the ticket that gives it something to carry ([#57](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/57)). The pause itself exists, because a run reaches `awaiting_confirmation` as soon as the files exist.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), the reviewer's decision document answering them ([#54](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/54)), the handoff bundle with its download ([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)), and the confirmation with the write-back, its retry and its abandonment ([#57](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/57)), are built. Every route and every field below is now live.
 
 ## What was already fixed before this ticket
 
@@ -201,6 +201,19 @@ The **screening log** is not on this wire. It is an audit record rather than a r
 
 `writeBack` is `null` until a write-back has been attempted. A non-empty `failed` is what turns the confirmation panel into a retry panel — and it is why [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) needed **no** extra state for the retry pause: a run with failures is paused at the confirmation interrupt, which is the definition of `awaiting_confirmation`. The difference the UI needs is derived from this field, not stored beside it.
 
+A failure's `cause` is a machine code from a closed list, like a flag's `refused` — no prose travels on the wire, and the surface renders a fixed sentence for each:
+
+| `cause` | What happened |
+| --- | --- |
+| `not_connected` | There was no live Connection when the node ran |
+| `wrong_workspace` | The live Connection named another workspace ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)) |
+| `unauthorised` | Notion answered `401` — a revoked or re-issued grant |
+| `rate_limited` | `429`, past its retry budget |
+| `notion_unavailable` | `5xx`, past its two retries |
+| `notion_refused` | Any other status Notion answered |
+
+The first three are **batch-wide**: they are true of every remaining row, so the node stops at the first one rather than collecting seven identical errors. Every unwritten row still appears in `failed` under that one cause, because which rows went unflipped is what the Reviewer takes to Notion.
+
 `files` is `null` until the emit node has run. `fileId` is opaque, so [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) can change the file set without touching this contract.
 
 ### The decision document — `POST /api/runs/:runId/review`
@@ -262,6 +275,8 @@ Editing a key would not change a value; it would change *which candidates exist*
 The second case is [ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)'s. A Reviewer whose original workspace is gone for good has imported the bundle and can never mark Notion; without this, their only exits are cancelling — which asserts the files never reached Attio, and is false — or leaving the batch reserved for ever.
 
 **The confirm route refuses `wrong_workspace` (`409`) before either payload is considered**, so `{ confirmed: true }` cannot start a write-back the run has no standing to make. `{ abandoned: true }` is the one payload the block does not refuse; it is the exit from it.
+
+**What comes back.** `200` and the snapshot the attestation produced, exactly as `/review` answers — so a partial failure reaches the Reviewer in the same answer rather than on the next poll, and the retry panel is the response to the click that caused it. Refusing the abandonment is `invalid_payload` (`400`), the same code every other judgement made against the run's own state uses.
 
 **One route serves both passes**, because the stage guard below already does the work: after a partial failure the run is genuinely back at the confirmation pause, so a retry is accepted for exactly the reason a first confirm is. The Retry button is this route with this payload.
 

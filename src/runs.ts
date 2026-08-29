@@ -20,10 +20,12 @@ import { type Decision, structuralProblem } from "./review.ts";
 import {
   deleteRun,
   insertRun,
+  readConnection,
   readRun,
   readRuns,
   type RunRecord,
 } from "./store.ts";
+import type { Confirmation, WriteBack } from "./writeback.ts";
 
 /** `docs/http-contract.md`'s closed list. */
 export type RunStatus =
@@ -53,10 +55,41 @@ const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
 const filesIn = (values: { files?: HandoffFile[] | null }) =>
   values.files ?? null;
 
+/** The few of a checkpoint's values this module reads by name. */
+interface RunValues {
+  files?: HandoffFile[] | null;
+  writeBack?: WriteBack | null;
+  abandoned?: boolean;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+}
+
+/**
+ * The live Connection naming a workspace other than the one this run read its
+ * batch from — the snapshot's `blocked`, and the confirm route's refusal
+ * (ADR-0008).
+ *
+ * The comparison is on the id and happens here, server-side; only the two
+ * **names** ever cross the wire, and they are for display. Putting the rule in
+ * the browser as well would let the two disagree, and this is the copy that
+ * enforces.
+ */
+export function blockedBy(values: RunValues) {
+  const connection = readConnection();
+  if (!connection || !values.workspaceId) return null;
+  if (connection.workspace_id === values.workspaceId) return null;
+  return {
+    reason: "wrong_workspace" as const,
+    readWorkspace: values.workspaceName ?? null,
+    liveWorkspace: connection.workspace_name ?? null,
+  };
+}
+
 /**
  * Read off the checkpoint's pending tasks, in this order:
  *
  * - something is running here, or threw here — only this process knows either
+ * - the reviewer abandoned the write-back — terminal, and not `done`
  * - a task is paused on an `interrupt()` — the Reviewer is what it waits for
  * - tasks are pending and nothing is running — the process restarted mid-run
  * - nothing is pending — the graph ran to the end
@@ -75,6 +108,10 @@ function statusFrom(
 ): RunStatus {
   if (working.has(runId)) return "running";
   if (threw.has(runId)) return "failed";
+  // Read from state rather than from the absence of pending work, because an
+  // abandoned run and a `done` one are both graphs that reached `END` — and the
+  // difference decides whether the batch is released.
+  if ((snapshot.values as RunValues).abandoned) return "abandoned";
   // The two nodes that interrupt, told apart by the task's name. The second
   // pause is reached the moment the files **exist** (#56) — not when they are
   // downloaded, which is a repeatable `GET` that moves nothing.
@@ -100,11 +137,12 @@ function statusFrom(
 export async function snapshotOf(run: RunRecord) {
   const state = await graph.getState(configFor(run.runId));
   const { values } = state;
+  const status = statusFrom(run.runId, state);
   return {
     runId: run.runId,
     batch: run.batch,
     createdAt: run.createdAt,
-    status: statusFrom(run.runId, state),
+    status,
     /**
      * The checkpoint's pending node — `snap.next`, which #3 verified names the
      * node about to run. It is what the run's page derives its step indicator
@@ -141,9 +179,21 @@ export async function snapshotOf(run: RunRecord) {
         filename: file.filename,
         bytes: Buffer.byteLength(file.content, "base64"),
       })) ?? null,
-    // The two below stay null until they mean something.
-    writeBack: null,
-    blocked: null,
+    /**
+     * `null` until a write-back has been attempted. A non-empty `failed` is
+     * what turns the confirmation panel into a retry panel — the run is paused
+     * at the confirmation interrupt either way, so the difference the surface
+     * needs is derived from this field rather than stored beside it.
+     */
+    writeBack: values.writeBack ?? null,
+    /**
+     * Only while the run can still be confirmed: `blocked` says what stops the
+     * button being clicked, so the browser can disable it with its reason
+     * *before* the click. A disabled button is not a guard and an error only
+     * visible after a click is not a screen; the confirm route holds the other
+     * half (ADR-0008).
+     */
+    blocked: status === "awaiting_confirmation" ? blockedBy(values) : null,
   };
 }
 
@@ -291,6 +341,66 @@ export async function reviewRun(
 }
 
 /**
+ * The attestation that the batch landed in Attio, into the run it belongs to —
+ * and, on a retry pass, the same route with the same payload, accepted for
+ * exactly the reason a first confirmation is.
+ *
+ * The guards, in the order the contract fixes:
+ *
+ * - the **stage guard**, which with the in-process claim is what makes a
+ *   double-submitted confirmation write once. The write node's re-query is the
+ *   third mechanism, and the only one that would hold across two processes.
+ * - **`not_connected`**, then **`wrong_workspace`**, *before either payload is
+ *   considered*, so a confirmation cannot start a write-back this run has no
+ *   standing to make. Both are preconditions on the Connection rather than
+ *   write-back outcomes, which is why they are HTTP errors and no write
+ *   failure ever is.
+ * - the abandonment's own precondition. Abandoning is accepted when a
+ *   write-back has **failed** or when one can **never begin** — and it is the
+ *   one payload `wrong_workspace` does not refuse, because it is the exit from
+ *   it (ADR-0008). Refused otherwise: there is nothing to abandon while the
+ *   write-back can still be attempted.
+ *
+ * Awaited, like the review: the reviewer has just clicked and is watching, and
+ * the retry budget inside the node is short precisely so this can be.
+ */
+export async function confirmRun(
+  run: RunRecord,
+  confirmation: Confirmation,
+): Promise<
+  | { ok: true }
+  | { wrongStage: RunStatus }
+  | { notConnected: true }
+  | { blocked: NonNullable<ReturnType<typeof blockedBy>> }
+  | { invalid: string }
+> {
+  if (resuming.has(run.runId)) return { wrongStage: "running" };
+  resuming.add(run.runId);
+  try {
+    const state = await graph.getState(configFor(run.runId));
+    const status = statusFrom(run.runId, state);
+    if (status !== "awaiting_confirmation") return { wrongStage: status };
+
+    const values = state.values as RunValues;
+    const blocked = blockedBy(values);
+    if ("confirmed" in confirmation) {
+      if (!readConnection()) return { notConnected: true };
+      if (blocked) return { blocked };
+    } else if (!values.writeBack?.failed.length && !blocked) {
+      return {
+        invalid:
+          "There is nothing to abandon: the write-back has not failed and can still be attempted.",
+      };
+    }
+
+    await work(run.runId, new Command({ resume: confirmation }));
+    return { ok: true };
+  } finally {
+    resuming.delete(run.runId);
+  }
+}
+
+/**
  * Resumes a stopped run from its last checkpoint, in a fresh process or this
  * one. It carries no workspace check of its own: a run can stall at any node,
  * and most of them never touch Notion.
@@ -318,8 +428,7 @@ export async function cancelRun(runId: string): Promise<void> {
 
 /**
  * The runs a disconnect would strand: their bundle is in Attio and their
- * write-back can no longer be made. Nothing is stranded until #57 brings the
- * confirmation pause, and this says so by deriving it rather than by knowing.
+ * write-back can no longer be made.
  */
 export async function runsAwaitingConfirmation(): Promise<string[]> {
   return (await statuses())

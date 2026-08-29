@@ -34,14 +34,20 @@ export function authorizeUrl(state: string): string {
 }
 
 /**
- * Every Notion call below is the same POST: an Authorization header, JSON in,
- * JSON out, and the version header the OAuth endpoints require as much as the
- * resource ones. Only the auth scheme and the reading of a bad status differ,
- * so those stay with the callers.
+ * Every Notion call below is the same request: an Authorization header, JSON
+ * in, JSON out, and the version header the OAuth endpoints require as much as
+ * the resource ones. Only the auth scheme, the method and the reading of a bad
+ * status differ, so those stay with the callers. The write-back is the one
+ * `PATCH`, which is the only reason the method is a parameter at all.
  */
-const notionPost = (authorization: string, path: string, body: unknown) =>
+const notionRequest = (
+  authorization: string,
+  path: string,
+  body: unknown,
+  method = "POST",
+) =>
   fetch(`${API}${path}`, {
-    method: "POST",
+    method,
     headers: {
       Authorization: authorization,
       "Content-Type": "application/json",
@@ -49,6 +55,9 @@ const notionPost = (authorization: string, path: string, body: unknown) =>
     },
     body: JSON.stringify(body),
   });
+
+const notionPost = (authorization: string, path: string, body: unknown) =>
+  notionRequest(authorization, path, body);
 
 export async function exchangeCode(code: string): Promise<Connection> {
   const res = await notionPost(basicAuth(), "/v1/oauth/token", {
@@ -138,6 +147,7 @@ interface NotionProperty {
 }
 
 interface NotionPage {
+  id?: string;
   properties?: Record<string, NotionProperty | undefined>;
 }
 
@@ -154,6 +164,17 @@ type NotionFilter =
 
 /** One row of the Notion export: its property names against plain values. */
 export type SourceRow = Record<string, string | null>;
+
+/**
+ * The Notion page a source row came from, carried on the row under a key no
+ * Notion property can have — `$` is not a character Notion allows a property
+ * name to start with, and every other reader here names the property it wants.
+ *
+ * It is on the row rather than beside it because the write-back intersects on
+ * **page ids** (ADR-0008): a duplicated database in a foreign workspace can
+ * carry the same `Source ID` values, and only the page id is workspace-scoped.
+ */
+export const PAGE_ID = "$pageId";
 
 /**
  * A `data_sources/{id}/query`, followed to the end. Notion pages the answer and
@@ -243,17 +264,45 @@ export async function queryBatchRows(
     },
     `asked for the rows in ${batch}`,
   )) {
-    rows.push(
-      Object.fromEntries(
+    // A result with no id is not a page. Dropping it here is what lets the
+    // write-back treat every row's page id as present (ADR-0008).
+    if (!page.id) continue;
+    rows.push({
+      ...Object.fromEntries(
         Object.entries(page.properties ?? {}).map(([name, property]) => [
           name,
           plainValue(property),
         ]),
       ),
-    );
+      [PAGE_ID]: page.id,
+    });
   }
   return rows;
 }
+
+/** The other end of the lifecycle `READY_FOR_CRM` is the middle of. */
+const IMPORTED = "Imported";
+
+/**
+ * One row marked as landed in the CRM — the only write this system makes, and
+ * the only place anything outside it is mutated (ADR-0007).
+ *
+ * It answers the raw `Response` rather than throwing, because **no write-back
+ * outcome is an HTTP error**: the status, its `Retry-After` and its retry
+ * budget are read by the write node, which puts them on the run's own surface.
+ * Setting a `status` to a fixed value is a no-op the second time, so a repeat
+ * is harmless — the node's re-query is what makes it unnecessary.
+ */
+export const markImported = (
+  accessToken: string,
+  pageId: string,
+): Promise<Response> =>
+  notionRequest(
+    `Bearer ${accessToken}`,
+    `/v1/pages/${pageId}`,
+    { properties: { "CRM status": { status: { name: IMPORTED } } } },
+    "PATCH",
+  );
 
 /**
  * Withdraws the grant at Notion. A `401` means Notion has already forgotten

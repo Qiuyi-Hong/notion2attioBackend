@@ -139,6 +139,32 @@ export const personIdOf = (row: SourceRow): string =>
   `person:${text(row, "Work email").trim().toLowerCase() || text(row, "Source ID")}`;
 
 /**
+ * The three candidates one source row contributes to, by id.
+ *
+ * Both identity values fall back to the source row's own id where the row does
+ * not carry one: a batch of rows with no website would otherwise collapse onto
+ * a single nameless company, which is a merge nobody asked for. The fallback
+ * keys the candidate; it never reaches the domain or email field, so a source
+ * id can never be exported as a domain.
+ *
+ * Exported because the write-back asks *was every candidate this row became
+ * exported?* (ADR-0007), and deriving those keys a second way there would let
+ * two readings disagree about which rows are safe to mark `Imported`.
+ */
+export function candidateIdsOf(row: SourceRow): {
+  companyId: string;
+  personId: string;
+  dealId: string;
+} {
+  const key = normalisedDomain(text(row, "Website")) || text(row, "Source ID");
+  return {
+    companyId: `company:${key}`,
+    personId: personIdOf(row),
+    dealId: `deal:${key}`,
+  };
+}
+
+/**
  * What the candidate ledger renders (#10): every candidate on screen, with the
  * repair log shown in place against the values it changed. The wire splits the
  * two — `candidates` grouped by object, `repairs` beside it — because Attio
@@ -151,13 +177,7 @@ export interface Ledger {
   repairs: Repair[];
 }
 
-/**
- * The batch, split. Both identity values fall back to the source row's own id
- * where the row does not carry one: a batch of rows with no website would
- * otherwise collapse onto a single nameless company, which is a merge nobody
- * asked for. The fallback keys the candidate; it never reaches the domain or
- * email field, so a source id can never be exported as a domain.
- */
+/** The batch, split. The candidate ids are `candidateIdsOf`'s, and only its. */
 export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
   const companies = new Map<string, CompanyCandidate>();
   const people = new Map<string, PersonCandidate>();
@@ -168,8 +188,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
     const sourceId = text(row, "Source ID");
     const website = text(row, "Website");
     const domain = normalisedDomain(website);
-    const key = domain || sourceId;
-    const companyId = `company:${key}`;
+    const { companyId, personId, dealId } = candidateIdsOf(row);
 
     if (website !== domain) {
       repairs.push({
@@ -195,7 +214,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
       // The first row of an account settles the values its siblings share —
       // and the one they disagree on, `Lead source`, is on the Person.
       deals.push({
-        id: `deal:${key}`,
+        id: dealId,
         companyId,
         owner: text(row, "Owner"),
         flags: [],
@@ -205,7 +224,6 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
     }
 
     const email = text(row, "Work email");
-    const personId = personIdOf(row);
     if (!people.has(personId)) {
       people.set(personId, {
         id: personId,

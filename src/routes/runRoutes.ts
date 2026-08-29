@@ -1,10 +1,6 @@
 /**
  * `/api/runs` — starting a run, watching it move, answering its first pause,
- * downloading what that produced, and ending it.
- *
- * `/confirm` is not here yet: the run reaches the second pause as soon as the
- * files exist (#56), but what answering it *does* — the write-back, its retry
- * and its abandonment — arrives with #57.
+ * downloading what that produced, answering its second pause, and ending it.
  *
  * `docs/http-contract.md` owns the payloads, the states and the error shape.
  */
@@ -15,6 +11,7 @@ import { ApiError } from "../errors.ts";
 import { Decision } from "../review.ts";
 import {
   cancelRun,
+  confirmRun,
   continueRun,
   fileFrom,
   listRuns,
@@ -24,6 +21,7 @@ import {
   statusOf,
 } from "../runs.ts";
 import { readRun, type RunRecord } from "../store.ts";
+import { Confirmation } from "../writeback.ts";
 
 const router = Router();
 
@@ -97,6 +95,64 @@ router.post("/:runId/review", async (req, res) => {
 
   // The ledger their decision produced, so a refusal reaches them in the same
   // answer rather than on the next poll.
+  res.json(await snapshotOf(run));
+});
+
+/**
+ * The second pause, answered — the human attestation that the batch landed in
+ * Attio, and on a retry the same route with the same payload.
+ *
+ * **No write-back outcome leaves here as an HTTP error.** A failed write, a
+ * `401` included, is run state on `GET /api/runs/:runId`: the reviewer is
+ * looking at the ledger, not at the response to a POST they will never see
+ * again. The two `409`s below are preconditions on the Connection — the
+ * write-back never starts — which is exactly why they may be errors.
+ */
+router.post("/:runId/confirm", async (req, res) => {
+  const run = requireRun(req.params.runId);
+
+  const confirmation = Confirmation.safeParse(req.body ?? {});
+  if (!confirmation.success) {
+    throw new ApiError(
+      "invalid_payload",
+      400,
+      z.prettifyError(confirmation.error),
+    );
+  }
+
+  const outcome = await confirmRun(run, confirmation.data);
+  if ("wrongStage" in outcome) {
+    throw new ApiError(
+      "wrong_stage",
+      409,
+      `This run is ${outcome.wrongStage}.`,
+    );
+  }
+  if ("notConnected" in outcome) {
+    throw new ApiError(
+      "not_connected",
+      409,
+      "No Notion workspace is connected.",
+      { reason: "absent" },
+    );
+  }
+  if ("blocked" in outcome) {
+    const { readWorkspace, liveWorkspace } = outcome.blocked;
+    // Naming both workspaces is what turns the refusal into an instruction:
+    // the repair is one click, and it is connecting to the first of them.
+    throw new ApiError(
+      "wrong_workspace",
+      409,
+      `This run read ${readWorkspace}. You are connected to ${liveWorkspace}.`,
+      { readWorkspace, liveWorkspace },
+    );
+  }
+  if ("invalid" in outcome) {
+    throw new ApiError("invalid_payload", 400, outcome.invalid);
+  }
+
+  // The snapshot the attestation produced, so a partial failure reaches the
+  // reviewer in the same answer rather than on the next poll.
   res.json(await snapshotOf(run));
 });
 
