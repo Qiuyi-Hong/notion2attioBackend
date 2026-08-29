@@ -20,7 +20,7 @@ One ZIP, named for the batch: **`handoff-2026-W34.zip`**.
 
 | file              | destination     | present when                                  |
 | ----------------- | --------------- | --------------------------------------------- |
-| `1-companies.csv` | Attio Companies | the batch has a company with no exported person |
+| `1-companies.csv` | Attio Companies | always                                        |
 | `2-people.csv`    | Attio People    | always                                        |
 | `3-deals.csv`     | Attio Deals     | always                                        |
 | `handoff-notes.md`| nobody          | always                                        |
@@ -145,8 +145,16 @@ leave a batch it was qualified into. Worse, it would make `CONTEXT.md` false:
 Tern's Company candidate carries no flag, so it is **Clear**, and Clear says
 "goes into the files".
 
-So the file is emitted conditionally. See
+So the file exists. See
 [ADR-0003](adr/0003-a-company-candidate-is-never-dropped-with-its-people.md).
+
+It is **always emitted**, even when it carries no rows —
+[ADR-0010](adr/0010-the-bundle-holds-the-same-file-set-every-week.md) reversed
+ADR-0003's conditional half. The *rows* are still exactly the companies with no
+exported person, so a week where every account has a contact produces a header
+and nothing under it. The reviewer opens the same four files every week, and a
+header-only companies file reads as *no company needed a row* rather than as *a
+file is missing*.
 
 ```
 Name,Domains,Primary location,Segment

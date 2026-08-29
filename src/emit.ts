@@ -138,11 +138,12 @@ const candidatesIn = (ledger: CheckedLedger) => [
 /**
  * The three import files, plus the one that is deliberately not an import file.
  *
- * `1-companies.csv` is **conditional**: it carries the companies no exported
- * person would carry into Attio, and is absent when there are none
- * (ADR-0003). The other two are always written, empty of rows or not — a
- * missing file and a file with no rows say different things, and only the
- * first is a bug worth noticing.
+ * All three are **always written**, empty of rows or not — a missing file and
+ * a file with no rows say different things, and only the first is a bug worth
+ * noticing. `1-companies.csv` was once conditional (ADR-0003); ADR-0010
+ * reversed that, so a reviewer opening the ZIP finds the same file set every
+ * week and a header-only companies file reads as *nothing needed one*, never
+ * as *a file went missing*.
  */
 export function bundleFiles(state: Emittable): HandoffFile[] {
   const companies = sent(state.companies);
@@ -158,27 +159,28 @@ export function bundleFiles(state: Emittable): HandoffFile[] {
   /**
    * A Company candidate is never dropped with its people (ADR-0003). Holding
    * an account's only contact must not silently delete an account that was
-   * qualified, so the company travels in a file of its own — and only then,
-   * because a company with an exported person already reaches Attio through
-   * that person's row.
+   * qualified, so the company travels in a file of its own.
+   *
+   * Only those companies: one with an exported person already reaches Attio
+   * through that person's row, and listing it here as well would offer Attio
+   * the same record twice. The *rows* stay conditional — the **file** does
+   * not (ADR-0010).
    */
   const withNoExportedPerson = companies.filter(
     (company) => peopleOn(company.id).length === 0,
   );
-  if (withNoExportedPerson.length > 0) {
-    members.push({
-      filename: "1-companies.csv",
-      bytes: csv(
-        ["Name", "Domains", "Primary location", "Segment"],
-        withNoExportedPerson.map((company) => [
-          company.name,
-          company.domain,
-          company.primaryLocation,
-          company.segment,
-        ]),
-      ),
-    });
-  }
+  members.push({
+    filename: "1-companies.csv",
+    bytes: csv(
+      ["Name", "Domains", "Primary location", "Segment"],
+      withNoExportedPerson.map((company) => [
+        company.name,
+        company.domain,
+        company.primaryLocation,
+        company.segment,
+      ]),
+    ),
+  });
 
   members.push({
     filename: "2-people.csv",
