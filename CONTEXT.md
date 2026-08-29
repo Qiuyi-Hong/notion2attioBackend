@@ -41,7 +41,9 @@ Every Warn is one of two kinds:
 
 ### Batch flag
 
-A flag that sits on the batch rather than on a candidate, because its answer is the same for every candidate. Asked once, before the files are made.
+A flag that sits on the batch rather than on a candidate. Asked once, in one place, before the files are made.
+
+A flag is a batch flag because of *when the reviewer answers it*, not because of the shape of the answer. The answer covers the whole batch. It need not be one value — it may reach different candidates differently.
 
 ## Candidate state
 
