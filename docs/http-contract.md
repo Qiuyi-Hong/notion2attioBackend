@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), and the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), and the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
 
 ## What was already fixed before this ticket
 
@@ -155,7 +155,7 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
 {
   runId, batch, status, createdAt,
   candidates: { companies: [...], people: [...], deals: [...] },  // per #10
-  batchFlags: [...],
+  batchFlags: [{ id, rule, level, kind, stage }],
   repairs:    [...],      // the repair log, shown in place
   files:      [{ fileId, filename, bytes }] | null,
   writeBack:  { written: sourceId[], failed: [{ sourceId, cause }] } | null,
@@ -164,6 +164,17 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
 ```
 
 `candidates` is grouped by the Attio object each candidate becomes, because the ledger is read that way and Attio imports one file per object. A Person carries a reference to its Company rather than a copy of it, and a Deal carries no name — reach-through and derived values resolve when the files are written ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
+
+Every candidate carries its own **`flags`** array — `{ id, rule, level, kind, override, siblings }` — because a flag attaches to a candidate and never to a source row ([ADR-0001](./adr/0001-flags-attach-to-candidate-records.md)). There is no top-level `flags` key: a flag has nowhere a source row could go.
+
+- `rule` names the rule that raised it, and is what the surface renders a fixed sentence for. No prose travels on the wire, which is also what keeps the screener's model unable to narrate ([ADR-0002](./adr/0002-a-model-may-only-raise-a-flag.md)).
+- `level` is `stop` or `warn`; `kind` is `decision` or `notice` on a Warn and `null` on a Stop.
+- `override` says whether the reviewer may force past it — a question only a Stop asks, since a Warn excludes nothing and so has nothing to force past. It is `false` on every Warn, and on `D1`, the one Stop that can never be forced ([ADR-0005](./adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md)).
+- `siblings` names the candidates that _caused_ the flag, by id rather than by name, where that is not the candidate carrying it. A person's name lives on their own candidate and is never copied. It is a list because one flag is one _problem_: a Deal whose account two People leave incomplete carries **one** `D1` naming both, not one Stop each.
+
+The candidate set and the flag set are fixed the moment `check` completes, so a poll never returns a different set of either ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)). What _is_ answered changes; which flags exist does not.
+
+`batchFlags` is asked once, in one place, before the files are made. Today it holds exactly one: `P1+P2`, the decision Warn confirming `Deal owner` and `Deal stage` — [#6](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/6)'s two batch rules, merged by [#18](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/18) into a single question. The name carries both halves because the payload does not: it holds `stage` and no owner. That is the two values' provenance rather than an omission — `Deal stage` has no Notion column and we never read Attio, so its proposal comes from configuration, while `Deal owner` is already on every Deal candidate and copying it here would put a value in two places. Any count the surface shows beside the flag — _six deals to `Maya`_ — is derived from those candidates as they stand, so storing it beside the flag would let the two disagree.
 
 Each entry in `repairs` names the **candidate field** the repaired value sits on — `domain`, not the source property `Website` it came from — alongside the original and the source row it arrived on, so the ledger marks it in place rather than in an audit screen elsewhere. A value that was already correct produces no entry.
 

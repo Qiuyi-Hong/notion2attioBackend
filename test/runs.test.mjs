@@ -289,8 +289,8 @@ test("the snapshot names the run, and holds nothing that has no meaning yet", as
   assert.equal(body.files, null);
   assert.equal(body.writeBack, null);
   assert.equal(body.blocked, null);
-  assert.deepEqual(body.batchFlags, [], "the flags are empty until #53");
-  // Grouped by object; the ledger's contents are `candidates.test.mjs`'s.
+  // Grouped by object; the ledger's contents are `candidates.test.mjs`'s, and
+  // its flags `flags.test.mjs`'s.
   for (const object of ["companies", "people", "deals"]) {
     assert.ok(Array.isArray(body.candidates[object]), object);
   }

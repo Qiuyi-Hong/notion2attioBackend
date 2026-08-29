@@ -76,8 +76,9 @@ function statusFrom(
 /**
  * The snapshot `GET /api/runs/:runId` answers with.
  *
- * The candidates and the repair log are read from the checkpoint, which is the
- * only place they exist (ADR-0009), and are empty until `transform` has run.
+ * The candidates, their flags and the repair log are read from the checkpoint,
+ * which is the only place they exist (ADR-0009), and are empty until
+ * `transform` and `check` have run.
  * One read serves the status and the ledger, so the two cannot come from two
  * different moments of a live thread.
  */
@@ -94,10 +95,9 @@ export async function snapshotOf(run: RunRecord) {
       people: values.people ?? [],
       deals: values.deals ?? [],
     },
-    // The flags arrive with #53, and the three below stay null until they mean
-    // something.
-    batchFlags: [],
+    batchFlags: values.batchFlags ?? [],
     repairs: values.repairs ?? [],
+    // The three below stay null until they mean something.
     files: null,
     writeBack: null,
     blocked: null,

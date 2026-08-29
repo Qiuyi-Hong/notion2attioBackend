@@ -3,9 +3,9 @@
  * No LangGraph Platform, no `@langchain/langgraph-sdk`: the run identifier is
  * the `thread_id` and the checkpoint file is the whole read model.
  *
- * Three nodes so far — read the batch, propose candidates from it, then pause
- * for the Reviewer. `check` arrives with #53, and the flags are empty until it
- * does.
+ * Four nodes so far — read the batch, propose candidates from it, check them,
+ * then pause for the Reviewer. `check` holds the deterministic rules today;
+ * the screener's two notice Warns join it with the model call (ADR-0002).
  *
  * `docs/research/langgraph-hitl.md` is where the API facts below were verified.
  */
@@ -30,6 +30,7 @@ import {
   Repair,
 } from "./candidates.ts";
 import config from "./config/config.ts";
+import { BatchFlag, checkFlags } from "./flags.ts";
 import { findSharedDataSource, queryBatchRows } from "./notion.ts";
 import { readConnection } from "./store.ts";
 
@@ -62,6 +63,8 @@ export const State = new StateSchema({
   people: z.array(PersonCandidate).default(() => []),
   deals: z.array(DealCandidate).default(() => []),
   repairs: z.array(Repair).default(() => []),
+  /** Asked once, in one place, before the files are made. */
+  batchFlags: z.array(BatchFlag).default(() => []),
 });
 
 const read: GraphNode<typeof State> = async (state) => {
@@ -87,6 +90,14 @@ const transform: GraphNode<typeof State> = (state) =>
   candidatesFrom(state.sourceRows);
 
 /**
+ * The deterministic rules, over the candidates the transform proposed. Pure,
+ * and the whole of it lives in `flags.ts`. The candidate set and the flag set
+ * are frozen the moment this returns (ADR-0004).
+ */
+const check: GraphNode<typeof State> = (state) =>
+  checkFlags(state, config.dealStage);
+
+/**
  * The first pause. An interrupted node re-runs from the top on resume, so this
  * one holds the `interrupt()` and nothing else — no read, no write, no log.
  */
@@ -108,9 +119,11 @@ export const checkpointer = SqliteSaver.fromConnString(config.databasePath);
 export const graph = new StateGraph(State)
   .addNode("read", read)
   .addNode("transform", transform)
+  .addNode("check", check)
   .addNode("review", review)
   .addEdge(START, "read")
   .addEdge("read", "transform")
-  .addEdge("transform", "review")
+  .addEdge("transform", "check")
+  .addEdge("check", "review")
   .addEdge("review", END)
   .compile({ checkpointer });
