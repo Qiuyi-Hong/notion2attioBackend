@@ -4,8 +4,10 @@ Maya qualifies accounts in Notion and moves them into Attio once a week, by hand
 through a working spreadsheet. This is the argument for replacing the part of that
 job the spreadsheet cannot reach, and the evidence for it.
 
-The write-up and the source are the same link. Every claim below is checkable
-against files in this repo: the real workbook is
+The write-up and the source are the same link —
+[`github.com/Qiuyi-Hong/notion2attioBackend`](https://github.com/Qiuyi-Hong/notion2attioBackend),
+public, and open without an account or a credential of any kind. Every claim below is
+checkable against files in this repo: the real workbook is
 [`data/crm-handoff-working.xlsx`](data/crm-handoff-working.xlsx), and the batch is
 the 8 rows of [`data/notion-source-seed.csv`](data/notion-source-seed.csv) that pass
 the filter `Batch = 2026-W34` **and** `CRM status = Ready for CRM` — the same rows as
@@ -146,6 +148,41 @@ not finished, so `Imported` never overstates
 ([ADR-0005](docs/adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md),
 [ADR-0007](docs/adr/0007-the-write-back-completes-or-is-abandoned.md)). That click is the
 whole point: it is what stops a batch being handed off twice.
+
+## What the reviewer sees
+
+![Prototype of the candidate ledger over the 2026-W34 batch: the eight source rows become candidates grouped into Companies, People and Deals; Brightyard's two rows merge into one Company; Tern Mobility's Person is Held for a missing work email; two notices carry verbatim quotes from the research notes; and export is refused while the batch flag and its Warns are unanswered.](docs/figures/review-screen-prototype.png)
+
+**This is a prototype, not the shipped screen** — Variant B of the three built to answer
+[#10](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/10), on branch
+[`prototype/review-screen`](https://github.com/Qiuyi-Hong/notion2attioFrontend/tree/prototype/review-screen).
+It is the primary source the real ledger was built from, and it runs over the real W34
+batch, but it is a throwaway artefact and nothing in it is wired to the pipeline.
+
+Four things in it carry the argument above. The header states the whole move in one line —
+**source rows in, candidates out** — and the tables below it are grouped by the Attio
+object each becomes, so what the reviewer reads matches what they will import. Brightyard
+is one Company marked `2 rows merged`, where the sheet's formula makes two. The two
+notices quote the research notes **verbatim** and say plainly what they are worth:
+*nothing to change — this pipeline never reads Attio, so it can relay the note but cannot
+check it*. And export is refused, with its reason, rather than failing on click.
+
+Being a prototype costs it one number, and the cost is worth showing rather than
+retouching: its header reads `21 candidates`, where the built pipeline derives **22** —
+7 Company, 8 Person, 7 Deal, printed by `npm run w34:derive` and tabled below. The
+prototype was drawn before the transform existed and nothing recomputes it. The rule
+this write-up states elsewhere applies to its own figure: where the two disagree, the
+derived output is right.
+
+**There is no figure of the Notion write-back, and its absence is the point.** The obvious
+second figure is `CRM status = Imported` on the seven rows — the column the spreadsheet
+could never write, written. It is omitted because no real write-back has produced one, and
+a screenshot of an import that did not happen is not a weaker figure than the real thing;
+it is a fabricated one. The rule the two figures are held to is not the same, on purpose:
+a prototype honestly labelled still answers *what shape is this surface*, while a
+simulated write-back answers *did this work* with a lie. What it would take to produce it
+is written down rather than left implicit — [the demo
+narrative](docs/demo-narrative.md), beat 6.
 
 ## Where the model does not earn its place
 
@@ -294,19 +331,20 @@ attestation over a signal that cannot be obtained, not an oversight.
 | [`CONTEXT.md`](CONTEXT.md) | The vocabulary — batch, run, candidate, flag, silent repair, confirmation, write-back |
 | [ADR-0001](docs/adr/0001-flags-attach-to-candidate-records.md) | Flags attach to candidates, not source rows |
 | [ADR-0002](docs/adr/0002-a-model-may-only-raise-a-flag.md) | A model may only raise a flag — the negative result above |
-| [ADR-0003 (companies)](docs/adr/0003-a-company-candidate-is-never-dropped-with-its-people.md) | A Company candidate is never dropped with its people |
-| [ADR-0003 (runs)](docs/adr/0003-the-server-keeps-its-own-record-of-runs.md) | The server keeps its own record of runs, so a lost link is recoverable |
+| [ADR-0003](docs/adr/0003-a-company-candidate-is-never-dropped-with-its-people.md) | A Company candidate is never dropped with its people |
 | [ADR-0004](docs/adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md) | The candidate set is frozen at the check pass |
 | [ADR-0005](docs/adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md) | A Deal is emitted only when its whole account is Clear |
 | [ADR-0006](docs/adr/0006-a-repeat-deal-for-a-known-account-is-not-a-duplicate.md) | A repeat deal for a known account is not a duplicate |
 | [ADR-0007](docs/adr/0007-the-write-back-completes-or-is-abandoned.md) | The write-back completes or is abandoned |
 | [ADR-0008](docs/adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md) | A run is confirmed only through the connection that read it |
+| [ADR-0009](docs/adr/0009-the-server-keeps-its-own-record-of-runs.md) | The server keeps its own record of runs, so a lost link is recoverable |
 
 **Specifications** — [the handoff bundle](docs/handoff-files.md),
 [the HTTP contract](docs/http-contract.md), [the run surfaces](docs/run-surfaces.md),
 [the Notion source database](docs/notion-source-database.md),
 [the Notion connection](docs/notion-oauth-connection.md),
-[what the Attio docs don't say](docs/attio-workspace.md).
+[what the Attio docs don't say](docs/attio-workspace.md),
+[the demo narrative](docs/demo-narrative.md).
 
 **Research** — [Attio's CSV importer](docs/research/attio-csv-importer.md),
 [human-in-the-loop in LangGraph.js](docs/research/langgraph-hitl.md),
@@ -331,10 +369,22 @@ number here disagrees with that output, the output is right.
 The argument above stands on the workbook, the batch, the decision record and the
 committed worked example. All four are in this repo now.
 
-The graph is compiled and run inside the Express process, and reaches its first
-interrupt: a run reads its batch from the connected Notion workspace and pauses for
-the Reviewer. The nodes between — **transform → check → emit**, the second interrupt
-and the write-back — are specified in [`docs/http-contract.md`](docs/http-contract.md)
-and not yet built. The frontend lives in a separate repository and holds no pipeline
-logic. Where a running demo exists, it is supporting evidence for this write-up rather
-than the other way round.
+The graph is compiled and run inside the Express process, and both of its interrupts
+are reached: **read → transform → check → *review* → emit → *confirm* → writeback**.
+A run reads its batch from the connected Notion workspace, pauses for the Reviewer,
+emits the bundle, pauses again for the confirmation, and writes `CRM status` back to
+Notion. The frontend lives in a separate repository and holds no pipeline logic — it
+renders the runs index, the run in flight, the ledger, and the confirmation inline
+beneath it.
+
+**The demo is not a link the assessor can click, and it is not meant to be.** It runs
+on `localhost` against our own Notion workspace, driven by us — there is no
+authorisation to put a public deployment behind, which is stated above as a decision
+rather than a shortfall, and the source database has a schema an arbitrary workspace
+will not have. What it shows, in what order, and the one step it cannot perform, are
+settled in [the demo narrative](docs/demo-narrative.md).
+
+So the demo is supporting evidence for this write-up rather than the other way round.
+If it is unreachable, nothing above stops being checkable: the workbook, the batch,
+the decision record and the committed worked example are all in this repo, and
+`npm run w34:derive` re-derives every number without a token or a network.
