@@ -34,6 +34,8 @@ A change the pipeline makes to a value without asking anyone. A repair is silent
 
 Anything that would create, merge or discard a candidate, or that would assert a fact the pipeline does not hold, is not a silent repair. It is a flag.
 
+A language model's reading of a value is never a silent repair. It is neither deterministic nor reversible, and it asserts something the pipeline was not given. A model can therefore only raise a flag. It never changes a value the reviewer will send.
+
 ## Flag
 
 One problem found on one candidate, or on the batch. A flag exists only if the reviewer can act on it: a warning nobody can answer is noise, not a flag. Every flag has a level.
