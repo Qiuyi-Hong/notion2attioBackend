@@ -109,6 +109,10 @@ A flag that sits on the batch rather than on a candidate. Asked once, in one pla
 
 A flag is a batch flag because of *when the reviewer answers it*, not because of the shape of the answer. The answer covers the whole batch. It need not be one value — it may reach different candidates differently.
 
+The answer covers the batch, not the candidates that were sendable at the moment it was answered. A candidate that becomes Clear afterwards is covered by the same answer, and the flag does not re-open. Any count in the flag's summary is a **derived value** — it describes the batch as it stands, and it moves while the reviewer works.
+
+A batch flag re-opens for one reason only: a candidate becomes Clear carrying a value the answer does not name. A count that moves is not such a reason; a new value is. A reviewer who answered *"owner `Maya`"* and then cleared a held candidate owned by `Sam` is being asked about `Sam`, not about the same question a second time.
+
 ## Candidate state
 
 Read off a candidate's flags and holds — never typed in as a value.
@@ -124,6 +128,8 @@ These replace the working sheet's `READY` and `CHECK`. `READY` becomes `Clear`. 
 A value the pipeline calculates from another value rather than reading from a source row. A Deal candidate's name is derived from its Company candidate's name.
 
 A derived value lives in exactly one place — on the candidate that owns it — and reaches the import files when they are written. It is never copied onto a second candidate, so it can never go stale in one place and stay correct in another.
+
+A value the pipeline shows the reviewer is derived on the same terms — a count of the candidates a flag describes is calculated from the candidates, not stored beside the flag. Such a value follows candidate state as the reviewer changes it, so it cannot be old. Unlike a derived value on a candidate, a reviewer edit never pins it: there is nothing to override in a number that only reports.
 
 ## Hold
 
