@@ -38,6 +38,24 @@ The notes file is for the Reviewer alone and is never imported. It carries what 
 
 A bundle is made only once every Warn is answered. It holds every Clear and answered candidate, and no Held one.
 
+## Confirmation
+
+The Reviewer's statement that the handoff bundle reached the CRM.
+
+It is an attestation, not an observation. The pipeline never reads the CRM, so a person saying so is the only signal it can have. A confirmation covers exactly the candidates the bundle held, and may be given long after the bundle was made, by someone at a different machine.
+
+## Write-back
+
+The only change this pipeline makes outside itself: after a confirmation, it records in Notion that a source row's accounts are now in the CRM.
+
+A row is marked only when **every** candidate it feeds has reached the CRM. Partial is not finished, so the mark never overstates.
+
+The write-back either completes or is **abandoned**; it has no half-done resting state. A row left unmarked is indistinguishable from a row that was never handed off, and the pipeline's own recovery path would then hand it off a second time — creating in the CRM a second opportunity that nobody asserted.
+
+**Abandoning the write-back** is the Reviewer's statement that the bundle *did* reach the CRM but that the record of it in Notion is being given up on. It is the opposite of ending a run without confirming, which says the bundle never reached the CRM at all. An abandoned run keeps its batch reserved: nothing may attempt that batch again until a person records the outcome in Notion by hand.
+
+The mark is never taken back. The pipeline may assert that a row was handed off; it has no standing to retract a person's word that the handoff landed.
+
 ## Source row
 
 One row of the Notion export. A source row describes a company **and** a person together. It is the pipeline's input and nothing else — it is not the unit of review, and it is not what goes into Attio.
