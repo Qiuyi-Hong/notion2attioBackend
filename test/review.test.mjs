@@ -348,9 +348,9 @@ test("an unparseable email re-interrupts into the ledger", async () => {
   assert.equal(cleared.held, false, "no longer Held");
 });
 
-test("an edit is taken as typed, pins, and clears no flag on the same value", async () => {
+test("an edit is taken as typed and pins", async () => {
   const run = await paused();
-  const { deal, warn } = shared(run);
+  const { deal } = shared(run);
 
   const after = await reviewed(run.runId, {
     edits: { [deal.id]: { owner: "  Maya  " } },
@@ -359,11 +359,63 @@ test("an edit is taken as typed, pins, and clears no flag on the same value", as
   const edited = after.candidates.deals.find((one) => one.id === deal.id);
   assert.equal(edited.owner, "  Maya  ", "exactly as typed, never repaired");
   assert.deepEqual(edited.overrides, ["owner"], "and pinned");
+});
+
+test("editing a flagged candidate clears none of its flags", async () => {
+  const run = await paused();
+  // The Person the batch Stops, edited on a field the Stop is not about —
+  // which is as close as the ledger allows, since no editable field carries a
+  // flag today: `email`, the value B1 is about, is read-only.
+  const { person, flag } = stopped(run);
+
+  const after = await reviewed(run.runId, {
+    edits: { [person.id]: { jobTitle: "Head of Ops" } },
+  });
+
+  const edited = after.candidates.people.find((one) => one.id === person.id);
+  assert.equal(edited.jobTitle, "Head of Ops", "the edit landed");
   assert.equal(
-    edited.flags.find((one) => one.rule === warn.rule).cleared,
+    edited.flags.find((one) => one.id === flag.id).cleared,
     false,
-    "editing the Deal is not a way to answer the Deal's Warn",
+    "editing near a flag is not a way to answer it",
   );
+  assert.equal(edited.held, true, "so the candidate is still Held");
+});
+
+test("an answer stands when a later document does not repeat it", async () => {
+  // The batch whose second answer is refused, so the run comes back to the
+  // pause and there is a *second* document to leave the first answer out of.
+  const run = await paused(UNSEEN_OWNER_BATCH);
+  const { person, flag } = stopped(run);
+
+  const first = await reviewed(run.runId, {
+    answers: {
+      [flag.id]: { email: "amina.yusuf@tern.example.com" },
+      [batchFlag(run).id]: true,
+    },
+  });
+  assert.equal(batchFlag(first).refused, "new_owner", "back at the pause");
+  assert.equal(
+    first.candidates.people.find((one) => one.id === person.id).held,
+    false,
+    "and the Stop was answered",
+  );
+
+  // The follow-up answers only the batch flag. It must not un-answer the
+  // Stop: half-persisting an answer — the value landing while its flag
+  // re-opens — would leave the ledger saying two things at once.
+  const later = await reviewed(run.runId, {
+    answers: { [batchFlag(run).id]: true },
+  });
+
+  const still = later.candidates.people.find((one) => one.id === person.id);
+  assert.equal(still.email, "amina.yusuf@tern.example.com");
+  assert.deepEqual(
+    still.flags.map((one) => [one.cleared, one.refused]),
+    [[true, null]],
+    "the Stop stays answered",
+  );
+  assert.equal(still.held, false);
 });
 
 test("re-typing what the pipeline proposed pins nothing", async () => {
@@ -525,6 +577,10 @@ test("the batch flag re-opens for an owner nobody has seen", async () => {
   const again = await reviewed(run.runId, {
     answers: { [batchFlag(run).id]: true },
   });
+  assert.ok(
+    sendableDeals(again).some((deal) => deal.owner === HELD_OWNER),
+    "and it stands with that Deal still sendable, not because it went away",
+  );
   assert.equal(batchFlag(again).cleared, true);
   assert.equal(batchFlag(again).refused, null);
 });

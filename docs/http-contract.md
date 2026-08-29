@@ -211,7 +211,11 @@ There is one entry per source row repaired, so a candidate several rows collapse
 
 This is also why the payload is not a patch of *rows*: [#6](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/6) attaches flags to candidates, and the reviewer edits candidates.
 
-`held` and `answers` are **not** sparse. They are what the reviewer decided, and a decision left out of the document is one they did not make. Holding a Company holds its People and its Deal — `held` need name only the Company, and the cascade is the server's ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
+`held` is **not** sparse, and replaces what came before: a hold is a state the reviewer sets, and un-naming it is the only way they have to take it back. Holding a Company holds its People and its Deal — `held` need name only the Company, and the cascade is the server's ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
+
+`answers` **accumulate**. A document that does not repeat an answer does not undo it, because an answer is an act the reviewer performed — a decision taken, or a notice read — and nobody can un-read a notice. Recording that the question was asked and answered is the whole reason answers are kept at all.
+
+It is also what keeps *"the batch flag re-opens for one reason only"* true. Were an omitted answer to re-open its flag, every flag would re-open on every round trip and the one documented re-open condition would mean nothing. It would also let a `B1` answer half-persist — the work email landing on the candidate while the Stop it answered re-opened — leaving the ledger saying two things at once.
 
 **What is editable.** Every field the files carry, except the two a candidate's identity is keyed on:
 

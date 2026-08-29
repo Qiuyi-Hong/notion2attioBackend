@@ -213,7 +213,7 @@ export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
   });
 
   return {
-    ...holds(companies, people, deals, new Set()),
+    ...candidateState({ companies, people, deals }, new Set()),
     batchFlags: [
       {
         id: "P1+P2:batch",
@@ -235,6 +235,9 @@ export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
  * reviewer's answers — so the rules below are stated once and the browser is
  * never asked to re-derive what the server enforces.
  *
+ * Not named for the **Hold**, which the glossary reserves for the reviewer's
+ * own act. A hold is one of the three things read here, not the whole of it.
+ *
  * - A candidate carrying an uncleared **Stop** is Held.
  * - A Company's hold reaches its People and its Deal, because a person line
  *   would create the company in Attio anyway (ADR-0004).
@@ -247,10 +250,8 @@ export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
  * D1 is therefore the one flag nothing answers: it is cleared here, by the
  * account becoming whole, which is exactly what `CONTEXT.md` says clears it.
  */
-export function holds(
-  proposedCompanies: CompanyCandidate[],
-  proposedPeople: PersonCandidate[],
-  proposedDeals: DealCandidate[],
+export function candidateState(
+  proposed: Pick<CheckedLedger, "companies" | "people" | "deals">,
   heldByReviewer: ReadonlySet<string>,
 ): Pick<CheckedLedger, "companies" | "people" | "deals"> {
   const stopped = (candidate: { flags: Flag[] }) =>
@@ -258,12 +259,12 @@ export function holds(
   const outstanding = (candidate: { held: boolean; flags: Flag[] }) =>
     candidate.held || candidate.flags.some((flag) => !flag.cleared);
 
-  const companies = proposedCompanies.map((company) => ({
+  const companies = proposed.companies.map((company) => ({
     ...company,
     held: heldByReviewer.has(company.id) || stopped(company),
   }));
 
-  const people = proposedPeople.map((person) => ({
+  const people = proposed.people.map((person) => ({
     ...person,
     held:
       heldByReviewer.has(person.id) ||
@@ -280,7 +281,7 @@ export function holds(
       ...people.filter((person) => person.companyId === companyId),
     ].every((sibling) => !outstanding(sibling));
 
-  const deals = proposedDeals.map((deal) => {
+  const deals = proposed.deals.map((deal) => {
     const accountWhole = whole(deal.companyId);
     const flags = deal.flags.map((flag) =>
       flag.rule === "D1" ? { ...flag, cleared: accountWhole } : flag,

@@ -30,9 +30,9 @@ import type {
 } from "./candidates.ts";
 import {
   type BatchFlag,
+  candidateState,
   type CheckedLedger,
   type Flag,
-  holds,
 } from "./flags.ts";
 
 /**
@@ -58,8 +58,13 @@ export type Answer = z.infer<typeof Answer>;
  * retyped the same value* from *the reviewer never touched it*, and a repair
  * would either lose its marking or keep it falsely.
  *
- * `held` and `answers` are complete, not sparse: they are what the reviewer
- * decided, and a decision they leave out is one they did not make.
+ * `held` is complete rather than sparse, and replaces what came before: a hold
+ * is a state the reviewer sets, and un-naming it is the only way they have to
+ * take it back.
+ *
+ * `answers` **accumulate**. An answer is an act performed, not a state
+ * re-asserted, so a document that does not repeat one does not undo it. See
+ * `answeredFlag` below for why that is load-bearing rather than lenient.
  */
 export const Decision = z.strictObject({
   edits: z
@@ -83,7 +88,16 @@ const EDITABLE = {
   deal: ["owner"],
 } as const;
 
-type Kind = keyof typeof EDITABLE;
+/** The Attio object a candidate becomes — the contract's own noun for it.
+ *  Not `kind`, which a `Flag` already uses for `decision` / `notice`. */
+type AttioObject = keyof typeof EDITABLE;
+
+/** Every candidate in the ledger, whichever object it becomes. */
+const candidatesIn = (ledger: CheckedLedger) => [
+  ...ledger.companies,
+  ...ledger.people,
+  ...ledger.deals,
+];
 
 /** Which flags a given answer is a control for. D1 is on no list: it has no
  *  control, and is cleared by the account becoming whole. */
@@ -94,8 +108,8 @@ const accepts = (flag: Flag | BatchFlag, answer: Answer): boolean => {
   return "email" in answer ? flag.rule === "B1" : flag.rule === "P1+P2";
 };
 
-const kinds = (ledger: CheckedLedger): Map<string, Kind> =>
-  new Map<string, Kind>([
+const objectsOf = (ledger: CheckedLedger): Map<string, AttioObject> =>
+  new Map<string, AttioObject>([
     ...ledger.companies.map((one) => [one.id, "company"] as const),
     ...ledger.people.map((one) => [one.id, "person"] as const),
     ...ledger.deals.map((one) => [one.id, "deal"] as const),
@@ -104,9 +118,7 @@ const kinds = (ledger: CheckedLedger): Map<string, Kind> =>
 const flagsOf = (ledger: CheckedLedger): Map<string, Flag | BatchFlag> =>
   new Map(
     [
-      ...ledger.companies.flatMap((one) => one.flags),
-      ...ledger.people.flatMap((one) => one.flags),
-      ...ledger.deals.flatMap((one) => one.flags),
+      ...candidatesIn(ledger).flatMap((one) => one.flags),
       ...ledger.batchFlags,
     ].map((flag) => [flag.id, flag]),
   );
@@ -120,20 +132,20 @@ export function structuralProblem(
   ledger: CheckedLedger,
   decision: Decision,
 ): string | null {
-  const kind = kinds(ledger);
+  const objects = objectsOf(ledger);
 
   for (const [candidateId, fields] of Object.entries(decision.edits)) {
-    const of = kind.get(candidateId);
-    if (!of) return `No candidate ${candidateId}.`;
+    const becomes = objects.get(candidateId);
+    if (!becomes) return `No candidate ${candidateId}.`;
     for (const field of Object.keys(fields)) {
-      if (!(EDITABLE[of] as readonly string[]).includes(field)) {
+      if (!(EDITABLE[becomes] as readonly string[]).includes(field)) {
         return `${field} is not editable on ${candidateId}.`;
       }
     }
   }
 
   for (const candidateId of decision.held) {
-    if (!kind.has(candidateId)) return `No candidate ${candidateId}.`;
+    if (!objects.has(candidateId)) return `No candidate ${candidateId}.`;
   }
 
   const flags = flagsOf(ledger);
@@ -197,6 +209,11 @@ export function applyDecision(
     ),
   );
 
+  /**
+   * What two addresses have to share to be one Person in Attio. Normalising
+   * to compare asserts nothing and is not a repair to log — the same reading
+   * `candidatesFrom` keys people on.
+   */
   const key = (person: PersonCandidate) =>
     (supplied.get(person.id) ?? person.email).trim().toLowerCase();
 
@@ -204,9 +221,15 @@ export function applyDecision(
    * Validated where it happens, against every other Person candidate in the
    * batch — because freeze would otherwise knowingly emit two person lines
    * that Attio collapses onto one record (ADR-0004).
+   *
+   * The string validated is the string that lands. Trimming it first would
+   * check one value and store another, and a silent repair never applies to
+   * what the reviewer typed (`CONTEXT.md`, *Silent repair*) — so an address
+   * with a stray space is `invalid_email`, and the reviewer is told rather
+   * than corrected.
    */
   const refusalOn = (person: PersonCandidate): Flag["refused"] => {
-    const email = supplied.get(person.id)?.trim();
+    const email = supplied.get(person.id);
     if (email === undefined) return null;
     if (!z.email().safeParse(email).success) return "invalid_email";
     return ledger.people.some(
@@ -216,12 +239,30 @@ export function applyDecision(
       : null;
   };
 
-  /** A flag is cleared by answering it, and by nothing else. */
+  /**
+   * A flag is cleared by answering it, and by nothing else.
+   *
+   * An answer **stands**. A document that does not repeat one does not undo
+   * it: an answer is an act the reviewer performed — a decision taken, or a
+   * notice read — and a reviewer cannot un-read a notice. That is the whole
+   * reason the pipeline records answers at all, where the working sheet could
+   * not record that the question was asked and answered (`CONTEXT.md`,
+   * *Reviewer*).
+   *
+   * It is also what keeps the batch flag's *"re-opens for one reason only"*
+   * true. If an omitted answer re-opened its flag, every flag would re-open on
+   * every round trip and the one documented re-open condition would mean
+   * nothing.
+   *
+   * A **hold** is the opposite, and is replaced wholesale in `candidateState`:
+   * it is a state the reviewer sets and takes back, and un-naming it is the
+   * only way they have to take it back.
+   */
   const answeredFlag = (flag: Flag, refused: Flag["refused"]): Flag => {
     const answer = decision.answers[flag.id];
-    if (answer === undefined) return { ...flag, cleared: false, refused: null };
+    if (answer === undefined) return { ...flag, refused: null };
     if (flag.rule === "B1" && answer !== true && "email" in answer) {
-      return { ...flag, cleared: refused === null, refused };
+      return { ...flag, cleared: flag.cleared || refused === null, refused };
     }
     return { ...flag, cleared: true, refused: null };
   };
@@ -250,7 +291,10 @@ export function applyDecision(
     answered(edited(deal)),
   );
 
-  const placed = holds(companies, people, deals, new Set(decision.held));
+  const placed = candidateState(
+    { companies, people, deals },
+    new Set(decision.held),
+  );
 
   return { ...placed, batchFlags: batchFlagsAfter(ledger, decision, placed) };
 }
@@ -286,9 +330,16 @@ function batchFlagsAfter(
 
   return ledger.batchFlags.map((flag) => {
     const answer = decision.answers[flag.id];
-    if (answer === undefined) return { ...flag, cleared: false, refused: null };
     const stage =
-      answer !== true && "stage" in answer ? answer.stage : flag.stage;
+      answer !== undefined && answer !== true && "stage" in answer
+        ? answer.stage
+        : flag.stage;
+    // Answered in this document, or standing from an earlier one. The re-open
+    // is judged on both: a Deal that becomes sendable under an unseen owner
+    // re-opens the flag whichever round its answer was given in.
+    if (!(flag.cleared || answer !== undefined)) {
+      return { ...flag, stage, cleared: false, refused: null };
+    }
     return unseen
       ? { ...flag, stage, cleared: false, refused: "new_owner" as const }
       : { ...flag, stage, cleared: true, refused: null };
@@ -298,8 +349,6 @@ function batchFlagsAfter(
 /** Whether any answer in the ledger was refused — the review is not over. */
 export const wasRefused = (ledger: CheckedLedger): boolean =>
   [
-    ...[...ledger.companies, ...ledger.people, ...ledger.deals].flatMap(
-      (candidate) => candidate.flags,
-    ),
+    ...candidatesIn(ledger).flatMap((candidate) => candidate.flags),
     ...ledger.batchFlags,
   ].some((flag) => flag.refused !== null);
