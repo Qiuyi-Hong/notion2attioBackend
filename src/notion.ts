@@ -1,7 +1,7 @@
 /**
- * The Notion calls the connection itself needs. Everything the pipeline reads
- * and writes lands elsewhere; this file is the OAuth legs and one look at what
- * the grant actually covers.
+ * Every Notion call the app makes from a route: the OAuth legs, the search
+ * that finds what the grant covers, and the read behind `GET /api/batches`.
+ * The pipeline's own reads and writes belong to the graph's nodes, not here.
  *
  * Facts from `docs/notion-oauth-connection.md` and `docs/research/notion-oauth.md`:
  * Basic auth on the OAuth endpoints, `Notion-Version` required on all of them,
@@ -67,21 +67,12 @@ export async function exchangeCode(code: string): Promise<Connection> {
 }
 
 /**
- * Whether the grant reaches any database at all. Notion's picker insists on at
- * least one page, but the user can pick pages holding nothing we can read —
- * which is a connected workspace with no batch in it, not a failure.
- *
- * This is the first use of the issued token, so it is also where a token that
- * is already dead shows up: a `401` is `not_connected`, and the repair is
- * authorising again.
+ * Both read-side calls read a bad status the same way, and the contract fixes
+ * both answers: a dead token is `not_connected`, because the repair is
+ * authorising again; anything else Notion says is `notion_failed`.
  */
-export async function grantsAnyDataSource(
-  accessToken: string,
-): Promise<boolean> {
-  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
-    filter: { property: "object", value: "data_source" },
-    page_size: 1,
-  });
+async function throwForStatus(res: Response, clause: string): Promise<void> {
+  if (res.ok) return;
   if (res.status === 401) {
     throw new ApiError(
       "not_connected",
@@ -90,15 +81,80 @@ export async function grantsAnyDataSource(
       { reason: "expired" },
     );
   }
-  if (!res.ok) {
-    throw new ApiError(
-      "notion_failed",
-      502,
-      `Notion answered ${res.status} when asked what the grant covers.`,
+  throw new ApiError(
+    "notion_failed",
+    502,
+    `Notion answered ${res.status} when ${clause}.`,
+  );
+}
+
+/**
+ * The data source the grant reaches, found by asking Notion rather than by
+ * reading an id from the environment — which is what keeps the consent screen
+ * load-bearing and makes *the user shared nothing* a real state. The env
+ * identifiers seed the fixture; they are not request-time config.
+ *
+ * `undefined` is a connected workspace with nothing in it for us, not a
+ * failure. This is also the first use of an issued token, so it is where a
+ * token that is already dead shows up.
+ *
+ * ponytail: the first shared data source wins. A workspace sharing several
+ * would need the picker to name the database as well as the batch.
+ */
+export async function findSharedDataSource(
+  accessToken: string,
+): Promise<string | undefined> {
+  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
+    filter: { property: "object", value: "data_source" },
+    page_size: 1,
+  });
+  await throwForStatus(res, "asked what the grant covers");
+  const body = (await res.json()) as { results?: { id?: string }[] };
+  return body.results?.[0]?.id;
+}
+
+/**
+ * The `Batch` of every row waiting for the CRM — the status leg of
+ * `docs/notion-source-database.md`'s filter, on its own. Notion's page shape
+ * stops here: the caller counts names.
+ *
+ * `CRM status` is a **status** property, so the filter key is `status`. Wrong
+ * key, wrong type: Notion answers `validation_error`, which surfaces as
+ * `notion_failed` rather than silently as zero rows.
+ *
+ * Notion pages the answer and the counts are the payload, so the cursor is
+ * followed to the end; a truncated count would simply be wrong.
+ */
+export async function queryReadyBatches(
+  accessToken: string,
+  dataSourceId: string,
+): Promise<string[]> {
+  const batches: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await notionPost(
+      `Bearer ${accessToken}`,
+      `/v1/data_sources/${dataSourceId}/query`,
+      {
+        filter: { property: "CRM status", status: { equals: "Ready for CRM" } },
+        page_size: 100,
+        ...(cursor && { start_cursor: cursor }),
+      },
     );
-  }
-  const body = (await res.json()) as { results?: unknown[] };
-  return (body.results ?? []).length > 0;
+    await throwForStatus(res, "asked for the rows ready for the CRM");
+    const body = (await res.json()) as {
+      results?: { properties?: { Batch?: { select?: { name?: string } } } }[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    };
+    for (const row of body.results ?? []) {
+      // `Batch` is a select, and an unset one belongs to no run.
+      const name = row.properties?.Batch?.select?.name;
+      if (name) batches.push(name);
+    }
+    cursor = body.has_more ? (body.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+  return batches;
 }
 
 /**
