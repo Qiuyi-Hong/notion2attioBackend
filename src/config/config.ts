@@ -25,6 +25,19 @@ interface Config {
     /** Pinned in the Notion portal by #14; sent on both legs of the exchange. */
     redirectUri: string;
   };
+  /**
+   * The notes screener (ADR-0002). The key is **optional**: with none, the
+   * notes are not read and the batch says so with the `N0` batch flag.
+   *
+   * The model is configuration because #9 left the choice reversible and #30
+   * reversed it on evidence. Reasoning effort is not: #30 found raising it
+   * bought no recall and cost precision, so it stays a constant in
+   * `screener.ts` where nothing can turn it into a knob.
+   */
+  openai: {
+    apiKey: string;
+    model: string;
+  };
 }
 
 const config: Config = {
@@ -39,6 +52,10 @@ const config: Config = {
     redirectUri:
       process.env.NOTION_OAUTH_REDIRECT_URI ||
       "http://localhost:3000/auth/notion/callback",
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || "",
+    model: process.env.OPENAI_MODEL || "gpt-5.6-sol",
   },
 };
 

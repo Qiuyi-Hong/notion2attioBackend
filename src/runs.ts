@@ -106,6 +106,12 @@ export async function snapshotOf(run: RunRecord) {
     },
     batchFlags: values.batchFlags ?? [],
     repairs: values.repairs ?? [],
+    /**
+     * The screening log, on the same rule as the repair log: not needing the
+     * Reviewer's attention is not the same as being hidden (ADR-0002). `null`
+     * until `check` has run, and after it when there was no key.
+     */
+    screening: values.screening ?? null,
     // The three below stay null until they mean something.
     files: null,
     writeBack: null,

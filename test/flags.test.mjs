@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import { fakeNotion } from "./notion-fake.mjs";
+import { fakeModel } from "./model-fake.mjs";
 import {
   parseCsv,
   buildProperties,
@@ -31,6 +32,10 @@ const DB_PATH = join(tmpdir(), `notion2attio-${randomUUID()}.sqlite`);
 process.env.DATABASE_PATH = DB_PATH;
 process.env.NOTION_OAUTH_CLIENT_ID = "test-client-id";
 process.env.NOTION_OAUTH_CLIENT_SECRET = "test-client-secret";
+// No model key: the deterministic rules are what this file is about, and the
+// screener's degraded path is asserted below. `dotenv` never overwrites what is
+// already set, so a developer's own `.env` cannot reach the real API from here.
+process.env.OPENAI_API_KEY = "";
 
 const { default: app } = await import("../src/app.ts");
 
@@ -80,6 +85,10 @@ const pages = parseCsv(readFileSync(CSV_PATH, "utf8")).map((row) => {
 });
 
 const notion = fakeNotion();
+// Faked on the no-key path too, so *no call was made* is asserted rather than
+// assumed — and a regression that read the notes without a key would reach a
+// fake rather than the real API.
+const model = fakeModel();
 
 // ── The app under test ─────────────────────────────────────────────────────
 
@@ -95,11 +104,13 @@ before(async () => {
 
 after(() => {
   server?.close();
+  model.restore();
   notion.restore();
   rmSync(DB_PATH, { force: true });
 });
 
 beforeEach(() => {
+  model.calls = [];
   notion.calls = [];
   notion.script = {
     "/v1/search": () => [
@@ -334,9 +345,10 @@ test("a flag attaches to a candidate, and has nowhere to name a source row", asy
 test("deal owner and stage are asked once for the batch, not once per deal", async () => {
   const { batchFlags, candidates } = await reviewSnapshot();
 
-  assert.equal(batchFlags.length, 1, "one flag, however many deals");
+  const asked = batchFlags.filter((one) => one.rule === "P1+P2");
+  assert.equal(asked.length, 1, "one flag, however many deals");
   assert.ok(candidates.deals.length > 1, "there are deals it covers");
-  const [flag] = batchFlags;
+  const [flag] = asked;
   // #6's two batch rules, merged by #18 into one question asked once.
   assert.equal(flag.rule, "P1+P2");
   assert.equal(flag.level, "warn");
@@ -356,6 +368,33 @@ test("deal owner and stage are asked once for the batch, not once per deal", asy
     assert.ok(
       owners.has(deal.owner),
       `${deal.id} proposes an owner its account's rows gave`,
+    );
+  }
+});
+
+// ── No model key ───────────────────────────────────────────────────────────
+
+test("with no key the notes go unread, and the batch says so out loud", async () => {
+  const { status, batchFlags, candidates, screening } = await reviewSnapshot();
+
+  assert.equal(status, "awaiting_review", "the run still completes");
+  assert.equal(model.calls.length, 0, "and nothing read the notes");
+  assert.equal(screening, null, "so there is no screening log");
+
+  // A notice, so the reviewer must acknowledge it like any other Warn: a
+  // missing key never silently produces a batch that looks clean.
+  assert.deepEqual(
+    batchFlags.filter((flag) => flag.kind === "notice"),
+    [{ id: "N0:batch", rule: "N0", level: "warn", kind: "notice" }],
+  );
+
+  // It sits on the batch and on no candidate, because nothing was read about
+  // any of them.
+  for (const candidate of everyCandidate(candidates)) {
+    assert.deepEqual(
+      candidate.flags.filter((flag) => flag.kind === "notice"),
+      [],
+      `${candidate.id} carries no notice`,
     );
   }
 });
