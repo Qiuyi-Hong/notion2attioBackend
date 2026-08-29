@@ -1,6 +1,6 @@
 # ADR-0003: A company candidate is never dropped with its people
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [ADR-0010](0010-the-bundle-holds-the-same-file-set-every-week.md) (the file is now always emitted; the rows it carries are unchanged)
 - **Date:** 2026-08-29
 - **Ticket:** [What files does the user download, and what is in them?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8)
 
@@ -27,6 +27,8 @@ The alternative considered was to drop the account and let it return in a later 
 Concretely, the run emits `1-companies.csv` — a third import file, ahead of people and deals — containing exactly those Company candidates that are Clear or answered but have no row in `2-people.csv`. On W34 that is one row: Tern Mobility.
 
 The file is **conditional**. Most batches will not produce one, and emitting an empty companies file every week would train the reviewer to ignore a file that occasionally matters.
+
+> **Amended by [ADR-0010](0010-the-bundle-holds-the-same-file-set-every-week.md).** This paragraph no longer holds: the file is always emitted, header-only when no company needs a row. An absent file could not be told apart from a lost one. The rest of this ADR stands.
 
 The corresponding Deal candidate ships as usual in `3-deals.csv`, with an empty `Associated people email addresses` cell.
 

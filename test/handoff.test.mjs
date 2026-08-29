@@ -307,7 +307,7 @@ test("a Company with no exported Person is still sent", async () => {
   assert.doesNotMatch(companies, /Employee range/);
 });
 
-test("1-companies.csv is absent when every company has an exported person", async () => {
+test("1-companies.csv is still sent, with no rows, when every company has an exported person", async () => {
   const ledger = await paused();
   const held = ledger.candidates.people.find((person) =>
     person.flags.some((flag) => flag.rule === "B1"),
@@ -327,7 +327,26 @@ test("1-companies.csv is absent when every company has an exported person", asyn
   };
 
   assert.equal(run.status, "awaiting_confirmation");
-  assert.equal(named(run.files, "1-companies.csv"), undefined);
+  // The file set does not change with the batch (ADR-0010). The header is
+  // written and there is nothing under it, which says *no company needed a
+  // row* — where an absent file would have said *a file went missing*.
+  const companies = await bytesOf(run, "1-companies.csv");
+  assert.equal(rowCount(companies), 0);
+  assert.equal(
+    companies.toString("utf8"),
+    "Name,Domains,Primary location,Segment",
+  );
+
+  // Asserted on the ZIP's own central directory, not just the bundle list:
+  // the reviewer opens the archive, and this is the batch shape that used to
+  // hand them three files where every other week hands them four.
+  assert.deepEqual(
+    Object.keys(
+      unzip(await bytesOf(run, `handoff-${TARGET_BATCH}.zip`)),
+    ).sort(),
+    [...IMPORT_FILES, "handoff-notes.md"],
+  );
+
   assert.equal(rowCount(await bytesOf(run, "2-people.csv")), 8);
   // The account is whole, so its Deal is no longer withheld.
   assert.equal(rowCount(await bytesOf(run, "3-deals.csv")), 7);
