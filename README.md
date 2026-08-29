@@ -17,7 +17,7 @@ Every count drawn from the workbook or the batch is printed by `npm run w34:deri
 which opens both files itself. Nothing is quoted from a ticket — and where a ticket and
 the workbook disagree, this write-up follows the workbook and says so.
 
-Detail lives behind links — nine [ADRs](docs/adr/), four
+Detail lives behind links — ten [ADRs](docs/adr/), four
 [research notes](docs/research/), and a committed
 [worked example](docs/examples/handoff-2026-W34/) — so this stays short and the
 evidence stays reachable.
@@ -231,10 +231,13 @@ Re-derived by `npm run w34:derive` from the batch data:
 | Deal | 7 | 6 | 1 |
 
 All 7 Company candidates are exported, but only one of them needs a row of its own:
-6 reach Attio through the relationship columns of `2-people.csv`, which is why the
-companies file is emitted conditionally rather than always. So the bundle is
-`1-companies.csv` (1 row), `2-people.csv` (7 rows), `3-deals.csv` (6 rows) and an inert
-`handoff-notes.md`. On confirmation, **7 of the 8 source rows** are marked `Imported`.
+6 reach Attio through the relationship columns of `2-people.csv`. The *rows* of the
+companies file are conditional in that way; the **file** is not, so every bundle holds
+the same four members and a header-only companies file reads as *nothing needed one*
+rather than as a file gone missing
+([ADR-0010](docs/adr/0010-the-bundle-holds-the-same-file-set-every-week.md)). So the
+bundle is `1-companies.csv` (1 row), `2-people.csv` (7 rows), `3-deals.csv` (6 rows)
+and an inert `handoff-notes.md`. On confirmation, **7 of the 8 source rows** are marked `Imported`.
 
 The held pair is the interesting case. Tern Mobility's contact has no work email, so the
 Person candidate is Held. Its Deal is Held too, on a Stop naming the sibling that caused
@@ -257,6 +260,209 @@ One finding that changes nothing downstream but is worth Maya's time: `Employees
 `11-50`, `201-500` — an en dash and a hyphen kept as separate Notion select options. The
 pipeline does not emit `Employee range` at all ([why](docs/attio-workspace.md)), so
 nothing breaks. The Notion database is still worth tidying.
+
+## How it is built
+
+Everything above is an argument about behaviour. This is the machine that produces it,
+and it is deliberately small: two processes, one SQLite file, nineteen backend source
+files and one graph.
+
+### Two repositories, one origin
+
+The backend is Express 5; the reviewer UI is React 19 on Vite, in
+[a separate repository](https://github.com/Qiuyi-Hong/notion2attioFrontend) that holds
+no pipeline logic. The Vite dev server proxies `/api` and `/auth` to port 3000, so **the
+browser only ever talks to one origin** — there is no CORS configuration on either side
+and no cookies at all. Every request the app makes is relative, so a built bundle served
+by Express works unchanged, and `FRONTEND_ORIGIN` is the one place an origin is named.
+
+`app.ts` is the whole of the wiring — body parsing, four routers, the error handler last.
+`server.ts` does nothing but fail fast on a missing Notion client id or secret, then listen.
+
+### The pipeline is a graph, compiled and run in-process
+
+`graph.ts` compiles a seven-node LangGraph `StateGraph` over a Zod `StateSchema` and
+`.invoke()`s it **inside the Express process**. There is no LangGraph Platform and no
+`@langchain/langgraph-sdk`: the run identifier is the `thread_id`, and the SQLite
+checkpoint is the whole read model.
+
+```mermaid
+flowchart LR
+  S([START]) --> read --> transform --> check --> review
+  review -- "answer refused · Warn unanswered" --> review
+  review --> emit --> confirm
+  confirm -- "abandoned" --> E([END])
+  confirm -- "confirmed" --> writeback
+  writeback -- "rows still unwritten — the retry edge" --> confirm
+  writeback --> E
+  review:::pause
+  confirm:::pause
+  classDef pause fill:#fde68a,stroke:#b45309,color:#111
+```
+
+The two shaded nodes are the human pauses. Three edges are conditional, and each is a
+rule from the argument above rather than plumbing:
+
+- **`review → review`**, while an answer was refused or any Warn is unanswered. The
+  refusal is the run *staying where it is*, not a `400` on a response the reviewer will
+  never see again — the problem appears on the candidate in the ledger they are already
+  working in, and nothing they got right is lost.
+- **`confirm → END`**, when the reviewer abandons: the bundle reached Attio and they are
+  giving up on marking Notion. Confirming is the only path into the one node that writes.
+- **`writeback → confirm`**, while any handed-off row is still unwritten. **That edge is
+  the entire retry mechanism** — no second pause, no second route, re-entered by the same
+  payload on the same endpoint, and re-entering costs nothing because the node re-queries
+  Notion before it writes ([ADR-0007](docs/adr/0007-the-write-back-completes-or-is-abandoned.md)).
+
+Both `interrupt()` calls sit in nodes that do nothing else. An interrupted node re-runs
+from the top on resume, so a side effect there would be charged again on every resume —
+which is also why the single model call lives in `check`, *before* the pause, rather than
+in `review`. Screened there, the same run shows the same notices every time it is looked at.
+
+### The state is the read model, and status is derived
+
+`store.ts` keeps three columns per run — identifier, batch, creation time — and nothing
+else. Every candidate, flag, repair and emitted byte lives in the graph checkpoint
+([ADR-0009](docs/adr/0009-the-server-keeps-its-own-record-of-runs.md)). Nothing is stored
+twice, so nothing can disagree.
+
+A run's status is likewise never stored. It is read off the checkpoint on **every**
+request, so it cannot lie about what is happening:
+
+| Status | Read from |
+| --- | --- |
+| `running` | the in-process working set |
+| `failed` | the in-process thrown set |
+| `abandoned` | `state.abandoned` — an abandoned run and a `done` one both reached `END`, and only `done` releases the batch |
+| `awaiting_review` | a pending task carrying interrupts, named `review` |
+| `awaiting_confirmation` | the same, named `confirm` — reached the moment the files **exist**, not when they are downloaded |
+| `stalled` | no checkpoint yet, or pending work with no interrupt |
+| `done` | nothing pending |
+
+One read serves both the status and the ledger, so the two cannot come from two different
+moments of a live thread.
+
+### The seven stages, and the rule each is held to
+
+| Node | Module | What it does | The rule |
+| --- | --- | --- | --- |
+| `read` | `notion.ts` | Finds the shared data source, queries the batch rows, stamps the workspace onto the run | Stamped by the node that queried, not at run creation: `POST /api/runs` answers `202` and the Connection can be replaced first ([ADR-0008](docs/adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)) |
+| `transform` | `candidates.ts` | Source rows become Company, Person and Deal candidates, deduplicated on the repaired domain and the work email — one Deal per Company, never per row | Every normalisation is written to the repair log; anything that would create, merge or discard a candidate is a flag instead |
+| `check` | `flags.ts`, `screener.ts` | The deterministic rules, and the one model call, over the proposed ledger | The candidate set and the flag set are frozen the moment it returns ([ADR-0004](docs/adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)) |
+| `review` | `review.ts` | Applies the reviewer's Decision — answers, holds and sparse edits | Structural nonsense is a `400` at the edge; semantic refusal comes back marked on the flag that was answered |
+| `emit` | `emit.ts` | Three RFC-4180 CSVs in dependency order plus `handoff-notes.md`, packed by a hand-rolled ZIP writer and hashed into stable file ids | It runs here rather than at download: a `GET` free to regenerate the files would be free to disagree with the ledger that was on screen |
+| `confirm` | — | Holds the second `interrupt()`, and nothing else | It is reached a second time after a partial write-back, carrying the failure list — which is what turns the confirmation panel into a retry panel |
+| `writeback` | `writeback.ts` | Re-queries Notion for rows still `Ready for CRM` and marks the fully-exported ones `Imported`, with rate-limit-aware retries | The only external mutation in the system. Every failure is a closed-list Cause on run state, never an HTTP error |
+
+### The flags, in full
+
+The whole flag vocabulary, and its being closed is the point — a flag exists only if the
+reviewer can act on it.
+
+| Rule | Level | Sits on | What it says |
+| --- | --- | --- | --- |
+| `B1` | Stop | Person | No work email. The reviewer may override it |
+| `W1` | Warn · decision | Deal | More than one Person on this account — which contact the Deal belongs to |
+| `D1` | Stop | Deal | A sibling in this account is not Clear. Names the sibling, is cleared by completing the account, and is the one flag with no way to force past it ([ADR-0005](docs/adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md)) |
+| `N1` · `N2` · `N1+N2` | Warn · notice | Person | The screener's two suspicion kinds, carrying a verbatim quote. Nothing to change — one flag is one *problem*, so both kinds on one person are one notice |
+| `P1+P2` | Warn · decision | Batch | `Deal owner` and `Deal stage`, asked once, in one place, before the files are made |
+| `N0` | Warn · notice | Batch | No API key, so nothing read the notes. A missing key never produces a batch that looks clean |
+
+A candidate's state is read off its flags and holds — never typed in. `flags.ts` derives
+the held cascade in one place: a candidate is Held for its own Stop, the reviewer's hold,
+or its Company's condition.
+
+### The I/O boundary
+
+Every stage above delegates its outside-world contact to exactly two modules, and the
+pipeline crosses the boundary nowhere else.
+
+`notion.ts` owns the whole Notion REST surface — the OAuth authorize URL, code exchange
+and token revocation (Basic auth, pinned `Notion-Version`), data-source discovery via
+search, paginated batch queries, and `markImported`.
+
+`store.ts` owns one SQLite file, opened through **`node:sqlite`** — no ORM and no driver
+dependency. Three tables, and LangGraph's checkpoint tables beside them in the same file,
+so a deployment has one artefact to back up and any cleanup is per-table:
+
+| Table | Holds |
+| --- | --- |
+| `connection` | One row, enforced by `CHECK (id = 1)`: the Notion token response and when it was granted |
+| `pending_authorisation` | One-shot OAuth `state` values with a TTL, spent on callback |
+| `runs` | `run_id`, `batch`, `created_at` — the recovery index, so a run whose link was lost is still findable |
+
+### The HTTP surface
+
+Thirteen endpoints across four routers, and one error envelope —
+`{ "error": { "code", "message", "details" } }` over a closed list of eight codes:
+`not_connected`, `wrong_workspace`, `no_such_run`, `no_such_file`, `wrong_stage`,
+`batch_in_progress`, `invalid_payload`, `notion_failed`.
+[`docs/http-contract.md`](docs/http-contract.md) is authoritative and **stays**
+authoritative where the code disagrees — a mismatch is a bug in the code, not in the spec.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /auth/notion/start` | Opens a one-shot pending authorisation and redirects to Notion's consent screen |
+| `GET /auth/notion/callback` | Claims the state, exchanges the code, saves the Connection, redirects back with a named outcome |
+| `GET /api/connection` | Names the connected workspace — never the token, never the ids |
+| `DELETE /api/connection` | Names the runs it will strand awaiting confirmation, then revokes the grant and drops the row |
+| `GET /api/batches` | The batches with rows waiting for the CRM and their ready counts, proving the filter runs against the live workspace |
+| `POST /api/runs` | Starts a run — `202` with the run id, or `409 batch_in_progress` naming the run that already holds it |
+| `GET /api/runs` | Every run with its derived status |
+| `GET /api/runs/:runId` | One run's full snapshot, read from the checkpoint |
+| `POST /api/runs/:runId/review` | The first pause: a Zod-validated Decision, answering with the resulting ledger |
+| `POST /api/runs/:runId/confirm` | The second pause: the attestation that the batch landed, triggering the write-back |
+| `GET /api/runs/:runId/files/:fileId` | One handoff file's stored bytes, served as an attachment and never regenerated |
+| `POST /api/runs/:runId/continue` | Resumes a stalled or failed run — `202`, or `409 wrong_stage` |
+| `DELETE /api/runs/:runId` | Cancels a run. Once files exist this is the attestation that they did **not** reach Attio |
+
+### The reviewer UI
+
+The dependency list is `react` and `react-dom`, and that is all of it. No router —
+`router.ts` is `history.pushState` plus `popstate` exposed to React through
+`useSyncExternalStore`. No state library and no data-fetching library: `api.ts` is one
+`request` wrapper, an `ApiError` carrying the server's code, and the wire types.
+
+Four screens, and beside three of them a **pure rules module with its own assertion
+self-check**, so the reading a screen does is testable without a browser:
+
+| Screen | Pure rules | Self-check |
+| --- | --- | --- |
+| `RunsIndex.tsx` — the front door | `runs.ts` — status to label, tone and one action; the sort that puts whatever needs a human first | `runs.check.ts` |
+| `Ledger.tsx` — the first pause | `ledger.ts` — candidate state, the rows behind a company, unanswered Warns, the export gate | `ledger.check.ts` |
+| `Confirm.tsx` — the second pause | `confirm.ts` — which files are offered and in what order, what disables Confirm and why, the retry panel, the abandon rule | `confirm.check.ts` |
+| `RunPage.tsx` | polls the snapshot and picks a layout per status | — |
+
+`npm run check` runs all three as `node src/*.check.ts`, with no test framework.
+
+The line those modules hold is worth naming: **the client never re-derives what the
+server decided.** `ledger.ts` reads candidate state and the export gate, and pointedly
+does not recompute the hold cascade — that reading has one home, in `flags.ts`, and two
+homes is how a ledger starts disagreeing with the files it produced.
+
+### What is not in the dependency list
+
+Nine backend runtime dependencies: Express, the three `@langchain/*` packages, Zod,
+`uuid`, `dotenv`, `body-parser` and `path`. Nothing else, and the absences are choices:
+
+- **No ORM and no SQLite driver** — `node:sqlite` ships with Node.
+- **No CSV library** — `emit.ts` writes RFC-4180 through one `csv()` helper, so there is
+  exactly one place a delimiter or a line ending can be wrong. The bytes are pinned
+  against Attio's own six templates.
+- **No ZIP library** — a hand-rolled, store-only writer.
+- **No OpenAI SDK** — the single model call is one `fetch` to `/v1/responses`, so the
+  closed-list schema, the two-kind enum and the quote check are all visible in
+  `screener.ts` rather than behind a client.
+
+### How the whole thing is checked
+
+`npm test` runs Node's own test runner over ten suites — 147 tests — with `notion-fake.mjs` and
+`model-fake.mjs` standing in for the two external services and `fresh-process.mjs` for
+the suites that need module state reset. `handoff-example-bytes.test.mjs` holds the
+committed W34 bundle to the byte. No token, no network.
+
+`npm run w34:derive` re-derives every number in this write-up from the workbook and the
+batch, and fails if any of fifteen claims stops being true.
 
 ## Stated as untested, because it is untestable
 
@@ -338,6 +544,7 @@ attestation over a signal that cannot be obtained, not an oversight.
 | [ADR-0007](docs/adr/0007-the-write-back-completes-or-is-abandoned.md) | The write-back completes or is abandoned |
 | [ADR-0008](docs/adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md) | A run is confirmed only through the connection that read it |
 | [ADR-0009](docs/adr/0009-the-server-keeps-its-own-record-of-runs.md) | The server keeps its own record of runs, so a lost link is recoverable |
+| [ADR-0010](docs/adr/0010-the-bundle-holds-the-same-file-set-every-week.md) | The bundle holds the same file set every week — amends ADR-0003 |
 
 **Specifications** — [the handoff bundle](docs/handoff-files.md),
 [the HTTP contract](docs/http-contract.md), [the run surfaces](docs/run-surfaces.md),
@@ -371,6 +578,8 @@ committed worked example. All four are in this repo now.
 
 The graph is compiled and run inside the Express process, and both of its interrupts
 are reached: **read → transform → check → *review* → emit → *confirm* → writeback**.
+The stages and the edges between them are laid out in
+[How it is built](#how-it-is-built) above.
 A run reads its batch from the connected Notion workspace, pauses for the Reviewer,
 emits the bundle, pauses again for the confirmation, and writes `CRM status` back to
 Notion. The frontend lives in a separate repository and holds no pipeline logic — it
