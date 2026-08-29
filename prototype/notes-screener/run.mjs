@@ -31,12 +31,18 @@ const arg = (name, fallback) => {
 };
 const flag = (name) => argv.includes(`--${name}`);
 
-const MODEL = arg('model', 'gpt-5.6-luna');
+const MODEL = arg('model', process.env.OPENAI_MODEL || readEnvFile('OPENAI_MODEL') || 'gpt-5.6-luna');
 const EFFORT = arg('effort', 'low');
 const PROMPT = arg('prompt', 'v2');
 const RUNS = Number(arg('runs', '3'));
+const SET = arg('set', 'w34');
 
-const fixtures = JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures.json'), 'utf8'));
+const SETS = { w34: 'fixtures.json', adversarial: 'adversarial.json' };
+if (!SETS[SET]) {
+  console.error(`unknown set "${SET}" — have: ${Object.keys(SETS).join(', ')}`);
+  process.exit(1);
+}
+const fixtures = JSON.parse(fs.readFileSync(path.join(HERE, SETS[SET]), 'utf8'));
 const TARGETS = new Set(fixtures.rows.filter((r) => r.expect.length).map((r) => r.sourceId));
 
 if (!PROMPTS[PROMPT]) {
@@ -122,28 +128,28 @@ for (let run = 1; run <= RUNS; run++) {
 
   console.log(rowLines.join('\n'));
 
-  const lattice = screeningLog
-    .filter((l) => l.run === run && l.sourceId === 'QL-260820-008')
-    .flatMap((l) => l.returned.map((s) => s.kind));
-  const passed = falsePositives === 0 && recallHits === 2;
-  runVerdicts.push({ run, falsePositives, recallHits, lattice, passed });
+  const multiKind = screeningLog
+    .filter((l) => l.run === run && new Set(l.returned.map((s) => s.kind)).size > 1)
+    .map((l) => l.sourceId);
+  const passed = falsePositives === 0 && recallHits === TARGETS.size;
+  runVerdicts.push({ run, falsePositives, recallHits, multiKind, passed });
   console.log(
-    `  → recall ${recallHits}/2, false positives ${falsePositives}/8 — ${passed ? 'PASS' : 'FAIL'}\n`
+    `  → recall ${recallHits}/${TARGETS.size}, false positives ${falsePositives}/${fixtures.rows.length} — ${passed ? 'PASS' : 'FAIL'}\n`
   );
 }
 
 console.log('=== verdict ===');
 for (const v of runVerdicts) {
   console.log(
-    `run ${v.run}: recall ${v.recallHits}/2, false ${v.falsePositives}, Lattice kinds ${fmt(v.lattice)} — ${v.passed ? 'PASS' : 'FAIL'}`
+    `run ${v.run}: recall ${v.recallHits}/${TARGETS.size}, false ${v.falsePositives}, two-kind rows ${fmt(v.multiKind)} — ${v.passed ? 'PASS' : 'FAIL'}`
   );
 }
 const allPass = runVerdicts.every((v) => v.passed);
-console.log(`\n${MODEL} @ effort=${EFFORT}, prompt=${PROMPT}: ${allPass ? 'CLEARS THE BAR' : 'MISSES THE BAR'}`);
-
-const latticeBoth = runVerdicts.filter((v) => new Set(v.lattice).size === 2).length;
 console.log(
-  `co-occurrence: Lattice Forge returned both kinds in ${latticeBoth}/${RUNS} runs — evidence for the ticket's question 2, not a pass/fail gate.`
+  `\n${MODEL} @ effort=${EFFORT}, prompt=${PROMPT}, set=${SET}: ${allPass ? 'CLEARS THE BAR' : 'MISSES THE BAR'}`
+);
+console.log(
+  `co-occurrence: rows carrying both kinds — ${runVerdicts.map((v) => `run ${v.run} ${fmt(v.multiKind)}`).join(', ')}. Evidence for the ticket's question 2, not a pass/fail gate.`
 );
 
 if (flag('log')) {

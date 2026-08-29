@@ -1,0 +1,260 @@
+[
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-001",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-002",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-003",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-004",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-005",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-006",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "She previously spoke to the team under another email address."
+      }
+    ],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-007",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 1,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-008",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "Noor replied from a newer email alias."
+      },
+      {
+        "kind": "N2",
+        "quote": "Their LinkedIn profile and role match a person already researched in the spring campaign."
+      }
+    ],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-001",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-002",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-003",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-004",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-005",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-006",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "She previously spoke to the team under another email address."
+      }
+    ],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-007",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 2,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-008",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "Noor replied from a newer email alias."
+      },
+      {
+        "kind": "N2",
+        "quote": "Their LinkedIn profile and role match a person already researched in the spring campaign."
+      }
+    ],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-001",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260818-002",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-003",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-004",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260819-005",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-006",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "She previously spoke to the team under another email address."
+      }
+    ],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-007",
+    "returned": [],
+    "discarded": []
+  },
+  {
+    "run": 3,
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "prompt": "v2",
+    "sourceId": "QL-260820-008",
+    "returned": [
+      {
+        "kind": "N1",
+        "quote": "Noor replied from a newer email alias."
+      },
+      {
+        "kind": "N2",
+        "quote": "Their LinkedIn profile and role match a person already researched in the spring campaign."
+      }
+    ],
+    "discarded": []
+  }
+]

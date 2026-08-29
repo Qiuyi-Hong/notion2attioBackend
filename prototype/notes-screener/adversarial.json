@@ -1,0 +1,62 @@
+{
+  "_comment": "PROTOTYPE — HELD-OUT adversarial set. Invented prose, not W34 data, deliberately parked on the boundary of #6's two rule sentences. Its job is to find the margin: W34 is 8 rows the screener passes 3/3, which proves it works on the only batch we have and says nothing about how close the edge is. LABELS HERE ARE A JUDGEMENT CALL, not #6's — where the model disagrees, read it first as evidence that the rule sentence is underspecified, and only then as a model failure.",
+  "batch": "adversarial",
+  "rows": [
+    {
+      "sourceId": "ADV-01",
+      "account": "Prior contact, different person",
+      "notes": "Their old agency contacted us last year about a similar project.",
+      "expect": [],
+      "why": "N1 is about THIS contact having been reached before. An agency is somebody else. Silent."
+    },
+    {
+      "sourceId": "ADV-02",
+      "account": "Earlier campaign, explicit non-match",
+      "notes": "We ran a campaign into this segment in the spring; nobody from this account replied.",
+      "expect": [],
+      "why": "Names an earlier campaign and then rules the match out. N2 needs a MATCH with an earlier campaign, not the mere existence of one. The strongest negative in the set."
+    },
+    {
+      "sourceId": "ADV-03",
+      "account": "Email changed, no prior contact",
+      "notes": "Rohan updated his email signature to the new domain after the rebrand.",
+      "expect": [],
+      "why": "A different email address with no earlier contact behind it. N1's clause is 'an earlier contact under a different email address' — the earlier contact is the load-bearing half."
+    },
+    {
+      "sourceId": "ADV-04",
+      "account": "Provable duplicate",
+      "notes": "Duplicate of the row above — same company, same person, submitted twice by the form.",
+      "expect": [],
+      "why": "A duplicate the pipeline proves from the data. ADR-0002's exclusion. This is the row that should separate prompt v1 from v2 if the exclusions are load-bearing at all."
+    },
+    {
+      "sourceId": "ADV-05",
+      "account": "Prior contact, same address",
+      "notes": "Sat next to our CEO at a conference in March and asked for a follow-up.",
+      "expect": [],
+      "why": "An earlier contact with this very person, but nothing about a different email address and no campaign. Both rules turn on a clause this note does not contain. The hardest negative: a screener reaching for 'have we seen them before?' rather than the written rule will fire here."
+    },
+    {
+      "sourceId": "ADV-06",
+      "account": "N1 paraphrased",
+      "notes": "Mail bounced from her old work address, so this is the current one.",
+      "expect": ["N1"],
+      "why": "N1 with none of #6's vocabulary. Tests whether the rule generalises past the wording Heliograph happens to use."
+    },
+    {
+      "sourceId": "ADV-07",
+      "account": "N2 paraphrased",
+      "notes": "Appears in the Q1 outbound list under a slightly different company name.",
+      "expect": ["N2"],
+      "why": "N2 with none of #6's vocabulary, and the match is on the company rather than the person."
+    },
+    {
+      "sourceId": "ADV-08",
+      "account": "Both kinds, one clause",
+      "notes": "We emailed him at a previous address during the winter push and he never replied.",
+      "expect": ["N1", "N2"],
+      "why": "Both kinds from ONE sentence, where Lattice Forge gets one sentence each. Tests whether two kinds can share a single span of evidence — the co-occurrence question at its most awkward."
+    }
+  ]
+}

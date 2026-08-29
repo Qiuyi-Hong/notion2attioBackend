@@ -10,14 +10,18 @@ Heliograph and Lattice Forge, and stay silent on the six rows that tempt it?
 
 ```sh
 node prototype/notes-screener/run.mjs --dry-run          # prompt, bar and fixture — no key needed
-node prototype/notes-screener/run.mjs                    # gpt-5.6-luna, effort low, prompt v2, 3 runs
+node prototype/notes-screener/run.mjs                    # OPENAI_MODEL, effort low, prompt v2, 3 runs
+node prototype/notes-screener/run.mjs --set adversarial  # the held-out boundary set
 node prototype/notes-screener/run.mjs --prompt v1        # kind definitions alone, no exclusions
-node prototype/notes-screener/run.mjs --effort medium    # first escalation lever
-node prototype/notes-screener/run.mjs --model <other>    # second escalation lever
+node prototype/notes-screener/run.mjs --effort medium    # the effort lever
+node prototype/notes-screener/run.mjs --model gpt-5.6-sol # the family lever
 node prototype/notes-screener/run.mjs --log              # write screening-log.json
 ```
 
-Needs `OPENAI_API_KEY` in `.env` or the environment. Exit code 0 = cleared the bar.
+Needs `OPENAI_API_KEY` in `.env` or the environment; `--model` defaults to `OPENAI_MODEL`.
+Exit code 0 = cleared the bar.
+
+**Every configuration that was run, and what it showed: [`RESULTS.md`](RESULTS.md).**
 
 ## What each file is
 
