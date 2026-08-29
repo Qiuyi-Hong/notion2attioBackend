@@ -67,21 +67,12 @@ export async function exchangeCode(code: string): Promise<Connection> {
 }
 
 /**
- * Whether the grant reaches any database at all. Notion's picker insists on at
- * least one page, but the user can pick pages holding nothing we can read —
- * which is a connected workspace with no batch in it, not a failure.
- *
- * This is the first use of the issued token, so it is also where a token that
- * is already dead shows up: a `401` is `not_connected`, and the repair is
- * authorising again.
+ * Every read-side call reads a bad status the same way, and the contract fixes
+ * both answers: a dead token is `not_connected`, because the repair is
+ * authorising again; anything else Notion says is `notion_failed`.
  */
-export async function grantsAnyDataSource(
-  accessToken: string,
-): Promise<boolean> {
-  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
-    filter: { property: "object", value: "data_source" },
-    page_size: 1,
-  });
+async function assertReadable(res: Response, what: string): Promise<void> {
+  if (res.ok) return;
   if (res.status === 401) {
     throw new ApiError(
       "not_connected",
@@ -90,15 +81,80 @@ export async function grantsAnyDataSource(
       { reason: "expired" },
     );
   }
-  if (!res.ok) {
-    throw new ApiError(
-      "notion_failed",
-      502,
-      `Notion answered ${res.status} when asked what the grant covers.`,
+  throw new ApiError(
+    "notion_failed",
+    502,
+    `Notion answered ${res.status} when ${what}.`,
+  );
+}
+
+/**
+ * The data source the grant reaches, found by asking Notion rather than by
+ * reading an id from the environment — which is what keeps the consent screen
+ * load-bearing and makes *the user shared nothing* a real state. The env
+ * identifiers seed the fixture; they are not request-time config.
+ *
+ * `undefined` is a connected workspace with nothing in it for us, not a
+ * failure. This is also the first use of an issued token, so it is where a
+ * token that is already dead shows up.
+ *
+ * ponytail: the first shared data source wins. A workspace sharing several
+ * would need the picker to name the database as well as the batch.
+ */
+export async function findSharedDataSource(
+  accessToken: string,
+): Promise<string | undefined> {
+  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
+    filter: { property: "object", value: "data_source" },
+    page_size: 1,
+  });
+  await assertReadable(res, "asked what the grant covers");
+  const body = (await res.json()) as { results?: { id?: string }[] };
+  return body.results?.[0]?.id;
+}
+
+/** The one property of a row this file's caller reads. */
+export interface ReadyRow {
+  properties?: { Batch?: { select?: { name?: string } | null } };
+}
+
+/**
+ * Every row waiting for the CRM, whichever batch it is in — the status leg of
+ * `docs/notion-source-database.md`'s filter, on its own.
+ *
+ * `CRM status` is a **status** property, so the filter key is `status`. Wrong
+ * key, wrong type: Notion answers `validation_error`, which surfaces here as
+ * `notion_failed` rather than silently as zero rows.
+ *
+ * Notion pages the answer and the counts are the payload, so the cursor is
+ * followed to the end; a truncated count would simply be wrong.
+ */
+export async function queryReadyRows(
+  accessToken: string,
+  dataSourceId: string,
+): Promise<ReadyRow[]> {
+  const rows: ReadyRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const res = await notionPost(
+      `Bearer ${accessToken}`,
+      `/v1/data_sources/${dataSourceId}/query`,
+      {
+        filter: { property: "CRM status", status: { equals: "Ready for CRM" } },
+        page_size: 100,
+        ...(cursor && { start_cursor: cursor }),
+      },
     );
-  }
-  const body = (await res.json()) as { results?: unknown[] };
-  return (body.results ?? []).length > 0;
+    await assertReadable(res, "asked for the rows ready for the CRM");
+    const body = (await res.json()) as {
+      results?: ReadyRow[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    };
+    rows.push(...(body.results ?? []));
+    cursor = body.has_more ? (body.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+  return rows;
 }
 
 /**

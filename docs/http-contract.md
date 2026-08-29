@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection routes are built ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)); batches and runs are not.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)) and batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) routes are built; runs are not.
 
 ## What was already fixed before this ticket
 
@@ -67,6 +67,21 @@ Both `/auth` routes are browser navigations, so the callback's answer is the URL
 | `GET /api/batches` | `[{ batch: "2026-W34", ready: 8 }]` — the distinct `Batch` values among `CRM status = Ready for CRM` rows, with counts. |
 
 This costs one Notion query and earns three things: the pre-run screen, an honest weekly-repeat story for [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13), and proof that the filter runs rather than sitting hardcoded in config.
+
+The route reads the **status leg alone** — `CRM status = Ready for CRM` — and groups what comes back by `Batch`. `CRM status` is a status property and `Batch` is a select ([`notion-source-database.md`](./notion-source-database.md)); a filter key that does not match the property's type is a `validation_error` from Notion, which leaves here as `notion_failed`, never as zero rows.
+
+**The data source is found by searching**, with the `data_source` object filter, on every request. No data-source identifier is read from config — `NOTION_DATA_SOURCE_ID` seeds the fixture and is not request-time configuration. That is what keeps the consent screen load-bearing: the grant decides what is readable.
+
+Four situations, and only the first answers with a list:
+
+| Situation | Answer |
+| --- | --- |
+| A grant reaching a data source | `200`, the list — empty when nothing is waiting |
+| No Connection | `409 not_connected` |
+| A Connection whose grant reaches no data source | `409 not_connected`, `details: { reason: "no_databases" }` |
+| Notion refuses the search or the query | `502 notion_failed` |
+
+The shared-nothing case is **not** an empty list: an empty list means *nothing is waiting this week*, which is what a healthy workspace with everything imported looks like. It carries the same `no_databases` name the connect banner already renders, under the `not_connected` code so the closed list stays closed. `details.reason` is `expired` when the grant is dead and `no_databases` when it covers nothing — the two repairs differ, and the banner names them apart.
 
 ### Runs
 

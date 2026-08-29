@@ -96,7 +96,7 @@ export function deleteConnection(): void {
 
 /**
  * The runs a disconnect would strand: their bundle is in Attio and their
- * write-back can no longer be made. #50 brings the `runs` table; until it does
+ * write-back can no longer be made. #51 brings the `runs` table; until it does
  * there is nothing to strand.
  */
 export function runsAwaitingConfirmation(): string[] {
