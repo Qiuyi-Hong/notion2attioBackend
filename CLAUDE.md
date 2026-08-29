@@ -16,4 +16,8 @@ Single-context — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agen
 
 ## karpathy-guidelines
 
-Behavioral guidelines to reduce common LLM coding mistakes. Use `/andrej-karpathy-skills:karpathy-guidelines` when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
+Behavioral guidelines to reduce common LLM coding mistakes.
+
+Rule:
+
+- Invoke `/andrej-karpathy-skills:karpathy-guidelines` when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
