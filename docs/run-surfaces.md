@@ -100,7 +100,15 @@ This reverses the reasoning in #16, which valued the run's URL being shareable b
 | Connected, nothing shared | Names the workspace, says no databases were shared, links back to the connect flow. |
 | Connection expired (401) | Names the cause, offers Connect. |
 
-**One case is not merely cosmetic.** Confirming a run writes `CRM status` back to Notion, so **Confirm import** is disabled while there is no live connection — a run can reach `awaiting_confirmation` and then lose the connection under it, which #15's warning on `DELETE /api/connection` does not cover because a 401 arrives without warning. Disabling the button with its reason is the whole fix on this surface. What is *not* settled here is whether a reconnection to a **different** workspace may confirm that run at all: see [#42](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42).
+**One case is not merely cosmetic.** Confirming a run writes `CRM status` back to Notion, so **Confirm import** is disabled while there is no live connection — a run can reach `awaiting_confirmation` and then lose the connection under it, which #15's warning on `DELETE /api/connection` does not cover because a 401 arrives without warning. Disabling the button with its reason is the whole fix on this surface.
+
+**A fourth state joins the three, and it is per-run rather than per-screen.** [#42](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42) settled the case #35 parked: a connection naming a **different** workspace may not confirm a run at all ([ADR-0008](adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)). The connection is live, so no banner fires and the start control stays enabled — a *new* run against the new workspace is perfectly legitimate. What is blocked is one particular run, so it shows on that run's row and on `/runs/:runId`, driven by the snapshot's `blocked` field:
+
+> **This run read _Carpe Lab_. You are connected to _Demo Space_.** Connect to _Carpe Lab_ again to confirm it.
+
+Naming both workspaces is the point — it turns a refusal into an instruction, and the repair is one click. The message is built from names the server supplies; the browser compares nothing.
+
+**The dead end gets an exit.** If the original workspace is gone for good, that run's bundle is in Attio and its rows can never be marked. Cancelling would assert the files never reached Attio, which is false, so **Abandon write-back** is offered on this run alongside the message — the same control [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) put behind a failed write, reachable here because the write can never begin. The app cannot know whether the workspace is gone for good, so it never withholds this exit — but it never leads with it either: reconnecting is the repair, abandoning is the admission that there is nothing left to reconnect to, and only the Reviewer knows which they are in. It sits below the message, not beside it.
 
 ## What this costs
 
@@ -114,5 +122,5 @@ This reverses the reasoning in #16, which valued the run's URL being shareable b
 | --- | --- |
 | Everything inside the ledger | [#10](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/10) |
 | The HTTP contract these surfaces call | [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) |
-| Confirming against a connection that did not read the run | [#42](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42) |
+| ~~Confirming against a connection that did not read the run~~ — settled, see above | [#42](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42) |
 | What the write-back does when it half-fails | [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) |

@@ -125,9 +125,12 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
   batchFlags: [...],
   repairs:    [...],      // the repair log, shown in place
   files:      [{ fileId, filename, bytes }] | null,
-  writeBack:  { written: sourceId[], failed: [{ sourceId, cause }] } | null
+  writeBack:  { written: sourceId[], failed: [{ sourceId, cause }] } | null,
+  blocked:    { reason: "wrong_workspace", readWorkspace, liveWorkspace } | null
 }
 ```
+
+`blocked` is `null` unless something stops the run being confirmed that is not a stage or a missing Connection. Today it has exactly one reason: the live Connection names a different Notion workspace from the one this run read the batch from ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)). `readWorkspace` and `liveWorkspace` are **names, for display** — the comparison happens on `workspace_id`, server-side, and the ids never reach the browser. The server decides and the browser renders; putting the rule in both places would let the two disagree, and the route holds the copy that enforces.
 
 `writeBack` is `null` until a write-back has been attempted. A non-empty `failed` is what turns the confirmation panel into a retry panel — and it is why [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) needed **no** extra state for the retry pause: a run with failures is paused at the confirmation interrupt, which is the definition of `awaiting_confirmation`. The difference the UI needs is derived from this field, not stored beside it.
 
@@ -155,15 +158,21 @@ This is also why the payload is not a patch of *rows*: [#6](https://github.com/Q
 
 `{ confirmed: true }` is the human's statement that they performed the Attio import. It is accepted on the first pass and on every retry pass.
 
-`{ abandoned: true }` is accepted **only** when `writeBack.failed` is non-empty — there is nothing to abandon before a write-back has failed. It ends the run `abandoned`.
+`{ abandoned: true }` is accepted when `writeBack.failed` is non-empty, **or** when `blocked.reason` is `wrong_workspace` — that is, when a write-back has failed, or when one can never begin. It ends the run `abandoned`. It is refused otherwise: there is nothing to abandon while the write-back can still be attempted.
+
+The second case is [ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)'s. A Reviewer whose original workspace is gone for good has imported the bundle and can never mark Notion; without this, their only exits are cancelling — which asserts the files never reached Attio, and is false — or leaving the batch reserved for ever.
+
+**The confirm route refuses `wrong_workspace` (`409`) before either payload is considered**, so `{ confirmed: true }` cannot start a write-back the run has no standing to make. `{ abandoned: true }` is the one payload the block does not refuse; it is the exit from it.
 
 **One route serves both passes**, because the stage guard below already does the work: after a partial failure the run is genuinely back at the confirmation pause, so a retry is accepted for exactly the reason a first confirm is. The Retry button is this route with this payload.
 
 **The write node re-queries Notion before writing** — `Batch = <batch> AND CRM status = Ready for CRM`, intersected with the rows this run handed off — and writes only what is still `Ready for CRM`. That makes the node idempotent against Notion rather than against a record of ours, which is what lets it survive a double-submit, a retry, and a process death mid-write alike. Writes are sequential (~3/s, [#4](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/4)); a `429` is retried honouring `Retry-After` and a `5xx` twice, after which the node stops and routes back to the pause with `writeBack.failed` populated.
 
-A `401` stops the node immediately rather than failing the remaining rows one at a time, and reports one cause for the batch. The run also records the `workspace_id` it read the batch from, and the write node refuses if the current Connection names a different workspace — a reconnect between demo takes must not write `Imported` into a workspace that never produced the batch.
+A `401` stops the node immediately rather than failing the remaining rows one at a time, and reports one cause for the batch.
 
-Full reasoning: [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md).
+**The run records the `workspace_id` and workspace name it read the batch from**, written into graph state by the node that queries Notion — not stamped at run creation, since `POST /api/runs` is a `202` and the Connection can change before the query runs. The write node refuses if the live Connection names a different workspace. That check is kept **in addition to** the route's `wrong_workspace`, because a run left `stalled` at the write-back is re-entered through `POST /api/runs/:runId/continue`, which never passes the confirm route. `continue` itself gains no check — a run can stall at any node, and most of them never touch Notion.
+
+Full reasoning: [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md) and [ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md).
 
 ### File download — `GET /api/runs/:runId/files/:fileId`
 
@@ -205,11 +214,14 @@ One shape, one closed list of codes.
 | Code | Status |
 | --- | --- |
 | `not_connected` | `409` |
+| `wrong_workspace` | `409` |
 | `no_such_run` | `404` |
 | `wrong_stage` | `409` |
 | `batch_in_progress` | `409` |
 | `invalid_payload` | `400` |
 | `notion_failed` | `502` |
+
+`wrong_workspace` sits next to `not_connected` on purpose: both are **preconditions on the Connection**, not write-back outcomes, so neither breaches the rule below — the write-back never starts. `not_connected` wins when there is no Connection at all. It is returned by `POST /api/runs/:runId/confirm` only. `/review` is deliberately unguarded: nothing between `review` and `emit` touches Notion, and since the block clears the moment the original workspace is connected again, stopping the Reviewer mid-triage would save no work ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)).
 
 `notion_failed` is **read-side only** — the batch query and the data-source search. No write-back outcome is ever an HTTP error: a failed write, `401` included, is run state on `GET /api/runs/:runId`, for the same reason semantic validation failures re-interrupt rather than return `400`. The reviewer is looking at the ledger, not at the response to a POST they will never see again.
 
