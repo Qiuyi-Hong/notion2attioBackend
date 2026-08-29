@@ -300,6 +300,56 @@ test("holding a Company holds its People and its Deal", async () => {
   }
 });
 
+test("the ledger says which holds are the reviewer's own", async () => {
+  const run = await paused();
+  const { company } = shared(run);
+
+  const after = await reviewed(run.runId, { held: [company.id] });
+  const all = [
+    ...after.candidates.companies,
+    ...after.candidates.people,
+    ...after.candidates.deals,
+  ];
+
+  assert.deepEqual(
+    all.filter((one) => one.heldByReviewer).map((one) => one.id),
+    [company.id],
+    "the Company the reviewer named, and only it",
+  );
+
+  // The cascade is Held, and says so — but naming it in the next document
+  // would hold it in its own right, which is not what the reviewer did.
+  const cascaded = all.filter((one) => one.held && !one.heldByReviewer);
+  assert.ok(cascaded.length > 0, "its People and its Deal went with it");
+
+  /**
+   * The point of the field. `held` in a decision document is not sparse and
+   * replaces what came before, so a browser that reloaded the ledger and could
+   * only see the derived `held` would either post the cascade back as holds of
+   * its own, or post nothing and take the reviewer's hold away on their next
+   * edit. Re-sending exactly what this names is what leaves the ledger where
+   * the reviewer left it.
+   */
+  const reloaded = await (await fetch(`${base}/api/runs/${run.runId}`)).json();
+  const theirs = [
+    ...reloaded.candidates.companies,
+    ...reloaded.candidates.people,
+    ...reloaded.candidates.deals,
+  ]
+    .filter((one) => one.heldByReviewer)
+    .map((one) => one.id);
+
+  const edited = await reviewed(run.runId, {
+    held: theirs,
+    edits: { [company.id]: { segment: "Enterprise" } },
+  });
+  assert.equal(
+    edited.candidates.companies.find((one) => one.id === company.id).held,
+    true,
+    "an edit after a reload does not take the hold away",
+  );
+});
+
 // ── What the freeze will not let the reviewer type ─────────────────────────
 
 test("an identity-keyed value is not editable", async () => {

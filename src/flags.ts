@@ -312,7 +312,10 @@ export function checkFlags(
  * never asked to re-derive what the server enforces.
  *
  * Not named for the **Hold**, which the glossary reserves for the reviewer's
- * own act. A hold is one of the three things read here, not the whole of it.
+ * own act. A hold is one of the three things read here, not the whole of it —
+ * and it is written back out as `heldByReviewer` beside the derived `held`,
+ * because the reviewer's next decision document has to name every hold it
+ * means to keep and the browser cannot tell the two apart from `held` alone.
  *
  * - A candidate carrying an uncleared **Stop** is Held.
  * - A Company's hold reaches its People and its Deal, because a person line
@@ -342,11 +345,13 @@ export function candidateState(
 
   const companies = proposed.companies.map((company) => ({
     ...company,
+    heldByReviewer: heldByReviewer.has(company.id),
     held: heldByReviewer.has(company.id) || stopped(company),
   }));
 
   const people = proposed.people.map((person) => ({
     ...person,
+    heldByReviewer: heldByReviewer.has(person.id),
     held:
       heldByReviewer.has(person.id) ||
       stopped(person) ||
@@ -370,6 +375,7 @@ export function candidateState(
     return {
       ...deal,
       flags,
+      heldByReviewer: heldByReviewer.has(deal.id),
       held: heldByReviewer.has(deal.id) || !accountWhole || stopped({ flags }),
     };
   });

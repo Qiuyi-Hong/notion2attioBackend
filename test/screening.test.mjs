@@ -367,11 +367,32 @@ test("no prose the model wrote, and no confidence score, reaches the wire", asyn
   const wire = JSON.stringify(snapshot);
   assert.ok(!wire.includes("I think this person"), "no model prose");
   assert.ok(!wire.includes("confidence"), "and no confidence score");
-  // Not even the quote it pointed at, which is the Reviewer's own text: it is a
-  // check, not a display, and it moves between identical runs (#30).
+  assert.ok(!wire.includes("quote"), "and nothing named a quote");
+
+  /**
+   * And no quote **span**.
+   *
+   * A kept quote is by definition a verbatim substring of the notes, and #60
+   * puts the full notes on the wire for every candidate — so the characters
+   * themselves are unavoidable, and asserting their absence would be asserting
+   * the notes are withheld. What is checkable, and what *the quote span is
+   * never rendered* actually means, is that the span is nowhere on the wire as
+   * a value of its own: the Reviewer is handed their own text whole, with
+   * nothing marking where the model looked.
+   *
+   * Blanking the notes is what makes that a test rather than a claim — every
+   * occurrence left afterwards would be the model's pointer travelling
+   * separately.
+   */
+  const withoutNotes = JSON.stringify(snapshot, (key, value) =>
+    key === "notes" ? [] : value,
+  );
   for (const suspicions of Object.values(SUSPICIONS)) {
     for (const suspicion of suspicions) {
-      assert.ok(!wire.includes(suspicion.quote), "and no quote span");
+      assert.ok(
+        !withoutNotes.includes(suspicion.quote),
+        "and no quote span outside the Reviewer's own notes",
+      );
     }
   }
 });

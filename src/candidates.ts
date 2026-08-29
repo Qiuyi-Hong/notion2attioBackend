@@ -40,6 +40,15 @@ import type { SourceRow } from "./notion.ts";
  */
 const reviewable = {
   held: z.boolean().default(() => false),
+  /**
+   * The reviewer's own hold, as against the `held` above that is read off it,
+   * the candidate's Stops and its Company. It is on the wire because the
+   * decision document's `held` is **not** sparse and replaces what came
+   * before: a browser that reloaded the ledger and could not tell a reviewer's
+   * hold from a cascaded one would post the reviewer's holds away on their
+   * next edit. The reviewer's act is data; only the cascade is derived.
+   */
+  heldByReviewer: z.boolean().default(() => false),
   overrides: z.array(z.string()).default(() => []),
 };
 
@@ -59,6 +68,29 @@ export const CompanyCandidate = z.object({
 });
 export type CompanyCandidate = z.infer<typeof CompanyCandidate>;
 
+/**
+ * One source row's `Research notes`, verbatim, carried to the ledger that
+ * shows them (#60).
+ *
+ * They sit on the Person because that is who they are written about — one
+ * contact at one company — and a value lives in exactly one place (ADR-0004).
+ * A Company and a Deal reach their account's notes through its People rather
+ * than holding a copy that could go stale.
+ *
+ * A list, because two source rows sharing a work email collapse onto one
+ * Person candidate and each brought its own notes. Each entry names the row it
+ * came from, exactly as a `Repair` does, so a collapse stays attributable.
+ *
+ * A row whose notes are empty produces no entry, on the repair log's rule: the
+ * absence is the honest reading, and the ledger says so where the list is
+ * empty rather than rendering a blank quotation.
+ */
+export const ResearchNotes = z.object({
+  sourceId: z.string(),
+  text: z.string(),
+});
+export type ResearchNotes = z.infer<typeof ResearchNotes>;
+
 /** Keyed on the work email address, and reaching its company by reference. */
 export const PersonCandidate = z.object({
   id: z.string(),
@@ -69,6 +101,7 @@ export const PersonCandidate = z.object({
   jobTitle: z.string(),
   linkedIn: z.string(),
   leadSource: z.string(),
+  notes: z.array(ResearchNotes).default(() => []),
   flags: z.array(Flag).default(() => []),
   ...reviewable,
 });
@@ -209,6 +242,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         primaryLocation: text(row, "HQ"),
         flags: [],
         held: false,
+        heldByReviewer: false,
         overrides: [],
       });
       // The first row of an account settles the values its siblings share —
@@ -219,12 +253,20 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         owner: text(row, "Owner"),
         flags: [],
         held: false,
+        heldByReviewer: false,
         overrides: [],
       });
     }
 
     const email = text(row, "Work email");
-    if (!people.has(personId)) {
+    const notes = text(row, "Research notes").trim();
+    const existing = people.get(personId);
+    if (existing) {
+      // A second row on one Person brought its own notes. Appending rather
+      // than overwriting is the same rule the repair log follows: what makes
+      // the collapse legible is that both originals are kept.
+      if (notes) existing.notes.push({ sourceId, text: notes });
+    } else {
       people.set(personId, {
         id: personId,
         sourceId,
@@ -234,8 +276,10 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         jobTitle: text(row, "Job title"),
         linkedIn: text(row, "LinkedIn"),
         leadSource: text(row, "Lead source"),
+        notes: notes ? [{ sourceId, text: notes }] : [],
         flags: [],
         held: false,
+        heldByReviewer: false,
         overrides: [],
       });
     }
