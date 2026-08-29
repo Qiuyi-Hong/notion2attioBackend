@@ -18,6 +18,16 @@ One pass of the pipeline over one batch — read the batch, propose candidates, 
 
 A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A batch may be attempted by more than one run — a run that ends without a confirmed handoff leaves the batch to be picked up again.
 
+## Handoff bundle
+
+What a run produces for the Reviewer to carry into Attio: the **import files**, and one **notes file**.
+
+An import file holds candidates of one kind, and is imported by hand into the matching Attio object. The import files have an order, because a record cannot be linked to one that does not exist yet.
+
+The notes file is for the Reviewer alone and is never imported. It carries what the CRM cannot be given by import, together with the record of what the run repaired and what the Reviewer decided.
+
+A bundle is made only once every Warn is answered. It holds every Clear and answered candidate, and no Held one.
+
 ## Source row
 
 One row of the Notion export. A source row describes a company **and** a person together. It is the pipeline's input and nothing else — it is not the unit of review, and it is not what goes into Attio.
