@@ -100,7 +100,10 @@ them into one company candidate, and it is why the domain repair is load-bearing
 rather than cosmetic — Attio matches companies on `Domains`, so an unrepaired
 `www.` prefix would have created a second Brightyard.
 
-`QL-260820-006` is listed for completeness; the value was already correct.
+`QL-260820-006` is listed for completeness; the value was already correct, so it
+is **not** an entry in the repair log itself — the log carries the seven repairs
+of substance, and this table shows all eight websites so the reader can see that
+one needed nothing.
 
 ---
 
