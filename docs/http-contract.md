@@ -154,6 +154,7 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
 ```
 {
   runId, batch, status, createdAt,
+  next:       nodeId[],   // the checkpoint's pending node — progress, derived
   candidates: { companies: [...], people: [...], deals: [...] },  // per #10
   batchFlags: [{ id, rule, level, kind, stage }],
   repairs:    [...],      // the repair log, shown in place
@@ -162,6 +163,10 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
   blocked:    { reason: "wrong_workspace", readWorkspace, liveWorkspace } | null
 }
 ```
+
+`next` is the checkpoint's pending node, passed straight through from `snap.next` — which [#3](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/3) verified names the node about to run. It is what the run's page derives its step indicator from ([`run-surfaces.md`](./run-surfaces.md)), and it is **derived on every read, never persisted**: ADR-0009's rule that the runs table holds nothing derivable is what makes a four-step indicator free. It is empty once the graph has run to the end.
+
+Node-level is the only granularity on offer. The notes screener is one node making up to eight model calls, and the checkpoint moves only at node boundaries, so the indicator sits still for most of a run — which the surface **shows rather than hides**. Splitting the screener into eight nodes to make a progress bar move, or opening a progress channel outside the checkpoint, were both rejected; see `run-surfaces.md`.
 
 `candidates` is grouped by the Attio object each candidate becomes, because the ledger is read that way and Attio imports one file per object. A Person carries a reference to its Company rather than a copy of it, and a Deal carries no name — reach-through and derived values resolve when the files are written ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
 

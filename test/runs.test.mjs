@@ -296,6 +296,17 @@ test("the snapshot names the run, and holds nothing that has no meaning yet", as
   }
 });
 
+test("the snapshot carries the pending node, so progress needs no field", async () => {
+  const { runId } = await (await start()).json();
+
+  const body = await reaches(runId, "awaiting_review");
+
+  // `snap.next`, passed straight through: the run's page reads its step from
+  // this, and nothing about progress is written down.
+  assert.deepEqual(body.next, ["review"]);
+  assert.deepEqual(body.next, (await stateOf(runId)).next);
+});
+
 test("GET never advances a run", async () => {
   const { runId } = await (await start()).json();
   await reaches(runId, "awaiting_review");

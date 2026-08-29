@@ -90,6 +90,15 @@ export async function snapshotOf(run: RunRecord) {
     batch: run.batch,
     createdAt: run.createdAt,
     status: statusFrom(run.runId, state),
+    /**
+     * The checkpoint's pending node — `snap.next`, which #3 verified names the
+     * node about to run. It is what the run's page derives its step indicator
+     * from, so progress is *read* rather than stored and ADR-0009's rule that
+     * the runs table holds nothing derivable survives untouched.
+     *
+     * Empty once the graph has run to the end.
+     */
+    next: [...state.next],
     candidates: {
       companies: values.companies ?? [],
       people: values.people ?? [],
