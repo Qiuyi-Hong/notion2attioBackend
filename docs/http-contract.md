@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)) and batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) routes are built; runs are not.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)) are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
 
 ## What was already fixed before this ticket
 

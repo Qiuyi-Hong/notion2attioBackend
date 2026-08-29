@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import batchRoutes from "./routes/batchRoutes.ts";
 import connectionRoutes from "./routes/connectionRoutes.ts";
 import notionAuthRoutes from "./routes/notionAuthRoutes.ts";
+import runRoutes from "./routes/runRoutes.ts";
 import { errorHandler } from "./middlewares/errorHandler.ts";
 
 const app = express();
@@ -14,6 +15,7 @@ app.use(bodyParser.json());
 app.use("/auth", notionAuthRoutes);
 app.use("/api/connection", connectionRoutes);
 app.use("/api/batches", batchRoutes);
+app.use("/api/runs", runRoutes);
 
 // Global error handler (should be after routes)
 app.use(errorHandler);

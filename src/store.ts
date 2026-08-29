@@ -1,9 +1,14 @@
 /**
- * The one SQLite file (#15, #49).
+ * The one SQLite file (#15, #49, #51).
  *
  * It holds the **Connection** — the whole token response, one row, overwritten
- * on every authorisation — and pending authorisations, the only rows here with
- * a lifetime. Nothing else: no session, no env config, no graph state.
+ * on every authorisation — pending authorisations, the only rows here with a
+ * lifetime, and the **runs**: identifier, batch, created time and nothing else.
+ *
+ * No graph state. Everything a run knows about its own work — status,
+ * candidates, flags, files — is read from the checkpoint the graph writes into
+ * the same file, because a column here would be a second source of truth that
+ * drifts the first time a process dies mid-run (ADR-0009).
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -42,6 +47,11 @@ function open(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS pending_authorisation (
       state      TEXT    PRIMARY KEY,
       expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS runs (
+      run_id     TEXT PRIMARY KEY,
+      batch      TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
   return db;
@@ -95,21 +105,53 @@ export function deleteConnection(): void {
 }
 
 /**
- * The runs a disconnect would strand: their bundle is in Attio and their
- * write-back can no longer be made. #51 brings the `runs` table; until it does
- * there is nothing to strand.
+ * A run, as the file records it. The identifier is a v4 UUID and it is also
+ * the LangGraph `thread_id` — there is no second identifier to reconcile.
  */
-export function runsAwaitingConfirmation(): string[] {
-  const handle = open();
-  const runsTable = handle
-    .prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
-    )
-    .get();
-  if (!runsTable) return [];
+export interface RunRecord {
+  runId: string;
+  batch: string;
+  createdAt: string;
+}
+
+const toRun = (row: {
+  run_id: string;
+  batch: string;
+  created_at: string;
+}): RunRecord => ({
+  runId: row.run_id,
+  batch: row.batch,
+  createdAt: row.created_at,
+});
+
+export function insertRun(runId: string, batch: string): RunRecord {
+  const createdAt = new Date().toISOString();
+  open()
+    .prepare("INSERT INTO runs (run_id, batch, created_at) VALUES (?, ?, ?)")
+    .run(runId, batch, createdAt);
+  return { runId, batch, createdAt };
+}
+
+/**
+ * `undefined` is a real lookup miss, which is what makes an unknown run id a
+ * `404` rather than the empty checkpoint state #3 found it silently returns.
+ */
+export function readRun(runId: string): RunRecord | undefined {
+  const row = open()
+    .prepare("SELECT run_id, batch, created_at FROM runs WHERE run_id = ?")
+    .get(runId) as Parameters<typeof toRun>[0] | undefined;
+  return row && toRun(row);
+}
+
+/** Newest first. What needs a human is the index's ordering, not the file's. */
+export function readRuns(): RunRecord[] {
   return (
-    handle
-      .prepare("SELECT run_id FROM runs WHERE status = 'awaiting_confirmation'")
-      .all() as { run_id: string }[]
-  ).map((row) => row.run_id);
+    open()
+      .prepare("SELECT run_id, batch, created_at FROM runs ORDER BY rowid DESC")
+      .all() as Parameters<typeof toRun>[0][]
+  ).map(toRun);
+}
+
+export function deleteRun(runId: string): void {
+  open().prepare("DELETE FROM runs WHERE run_id = ?").run(runId);
 }

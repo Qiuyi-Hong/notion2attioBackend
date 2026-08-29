@@ -27,11 +27,15 @@
     "attio:templates": "node scripts/inspect-attio-templates.mjs"
   },
   "dependencies": {
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.13",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.4",
     "body-parser": "^2.3.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "path": "^0.12.7",
-    "uuid": "^14.0.2"
+    "uuid": "^14.0.2",
+    "zod": "^4.5.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

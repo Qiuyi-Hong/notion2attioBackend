@@ -1,0 +1,175 @@
+/**
+ * What a run *is*, between the `runs` table and the checkpoint.
+ *
+ * The table holds a run's identifier, batch and created time. Everything else
+ * is derived here from the checkpoint on every request (ADR-0009), which is
+ * why a process that dies mid-run leaves a run reading `stalled` rather than
+ * one whose stored status lies about what is happening.
+ *
+ * Two things live only in this process's memory, on purpose: which runs are
+ * working right now, and which threw. Both are gone after a restart, and both
+ * degrade to `stalled` — the contract keeps no failure record.
+ */
+
+import { randomUUID } from "node:crypto";
+import { checkpointer, graph } from "./graph.ts";
+import {
+  deleteRun,
+  insertRun,
+  readRun,
+  readRuns,
+  type RunRecord,
+} from "./store.ts";
+
+/** `docs/http-contract.md`'s closed list. */
+export type RunStatus =
+  | "running"
+  | "awaiting_review"
+  | "awaiting_confirmation"
+  | "done"
+  | "abandoned"
+  | "failed"
+  | "stalled";
+
+/** Work in flight in this process — also the per-run lock (#3 found none). */
+const working = new Set<string>();
+
+/** Nodes that threw since this process started. */
+const threw = new Set<string>();
+
+const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
+
+/**
+ * Read off the checkpoint's pending tasks, in this order:
+ *
+ * - something is running here, or threw here — only this process knows either
+ * - a task is paused on an `interrupt()` — the Reviewer is what it waits for
+ * - tasks are pending and nothing is running — the process restarted mid-run
+ * - nothing is pending — the graph ran to the end
+ *
+ * A checkpoint that does not exist yet is the same picture as pending work:
+ * the run was created and never got anywhere, so it is `stalled` too.
+ */
+export async function statusOf(runId: string): Promise<RunStatus> {
+  if (working.has(runId)) return "running";
+  if (threw.has(runId)) return "failed";
+  const snapshot = await graph.getState(configFor(runId));
+  if (snapshot.tasks.some((task) => task.interrupts.length > 0)) {
+    // `review` is the only node that interrupts so far. The confirmation
+    // pause joins it with #57, and is told apart by the task's name.
+    return "awaiting_review";
+  }
+  if (!snapshot.createdAt || snapshot.next.length > 0) return "stalled";
+  return "done";
+}
+
+/** The snapshot `GET /api/runs/:runId` answers with. */
+export async function snapshotOf(run: RunRecord) {
+  return {
+    runId: run.runId,
+    batch: run.batch,
+    createdAt: run.createdAt,
+    status: await statusOf(run.runId),
+    // The ledger is empty until #52 fills it, and the three below stay null
+    // until they mean something.
+    candidates: [],
+    batchFlags: [],
+    repairs: [],
+    files: null,
+    writeBack: null,
+    blocked: null,
+  };
+}
+
+export async function listRuns() {
+  return Promise.all(
+    readRuns().map(async (run) => ({
+      runId: run.runId,
+      batch: run.batch,
+      createdAt: run.createdAt,
+      status: await statusOf(run.runId),
+    })),
+  );
+}
+
+/**
+ * The run still holding this batch, if one does. Only a `done` run releases
+ * its batch: it has written `Imported` to Notion, so its rows leave the filter
+ * anyway. Every other state holds it, `failed` and `abandoned` included —
+ * a second run would read the same rows and make the same Deals, and #2 found
+ * Deals always create, with no undo.
+ */
+export async function runHolding(
+  batch: string,
+): Promise<RunRecord | undefined> {
+  for (const run of readRuns()) {
+    if (run.batch === batch && (await statusOf(run.runId)) !== "done") {
+      return run;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Drives the graph to its next stop. Nothing awaits this: the route has
+ * already answered `202`, and the first pause is 20–40 seconds away.
+ *
+ * `durability: "sync"` puts the input checkpoint down before the first node
+ * runs, so a process killed inside that node still leaves a run something can
+ * be continued from.
+ */
+async function work(runId: string, input: { batch: string } | null) {
+  working.add(runId);
+  threw.delete(runId);
+  try {
+    await graph.invoke(input, { ...configFor(runId), durability: "sync" });
+  } catch (error) {
+    threw.add(runId);
+    console.error(`Run ${runId} failed:`, error);
+  } finally {
+    working.delete(runId);
+    // Cancelled while it was still working: the run is gone, so the checkpoint
+    // this just wrote has nothing left to belong to.
+    if (!readRun(runId)) await checkpointer.deleteThread(runId);
+  }
+}
+
+/** The row exists before the caller is answered, so a reload cannot orphan it. */
+export function startRun(batch: string): RunRecord {
+  const run = insertRun(randomUUID(), batch);
+  void work(run.runId, { batch });
+  return run;
+}
+
+/**
+ * Resumes a stopped run from its last checkpoint, in a fresh process or this
+ * one. It carries no workspace check of its own: a run can stall at any node,
+ * and most of them never touch Notion.
+ */
+export async function continueRun(run: RunRecord): Promise<void> {
+  const snapshot = await graph.getState(configFor(run.runId));
+  // Nothing was checkpointed before the process died, so there is no last
+  // checkpoint to resume from — the run starts from its input instead.
+  void work(run.runId, snapshot.createdAt ? null : { batch: run.batch });
+}
+
+/** Deletes the run and releases its batch. */
+export async function cancelRun(runId: string): Promise<void> {
+  deleteRun(runId);
+  await checkpointer.deleteThread(runId);
+}
+
+/**
+ * The runs a disconnect would strand: their bundle is in Attio and their
+ * write-back can no longer be made. Nothing is stranded until #57 brings the
+ * confirmation pause, and this says so by deriving it rather than by knowing.
+ */
+export async function runsAwaitingConfirmation(): Promise<string[]> {
+  const stranded: string[] = [];
+  for (const run of readRuns()) {
+    if ((await statusOf(run.runId)) === "awaiting_confirmation") {
+      stranded.push(run.runId);
+    }
+  }
+  return stranded;
+}

@@ -114,47 +114,134 @@ export async function findSharedDataSource(
 }
 
 /**
- * The `Batch` of every row waiting for the CRM — the status leg of
- * `docs/notion-source-database.md`'s filter, on its own. Notion's page shape
- * stops here: the caller counts names.
- *
- * `CRM status` is a **status** property, so the filter key is `status`. Wrong
- * key, wrong type: Notion answers `validation_error`, which surfaces as
- * `notion_failed` rather than silently as zero rows.
- *
- * Notion pages the answer and the counts are the payload, so the cursor is
- * followed to the end; a truncated count would simply be wrong.
+ * The one status either read cares about. `docs/notion-source-database.md`'s
+ * filter is asymmetric: `CRM status` is a **status** property, so its filter
+ * key is `status`, while `Batch` is a **select**. Wrong key, wrong type:
+ * Notion answers `validation_error`, which surfaces as `notion_failed` rather
+ * than silently as zero rows.
+ */
+const READY_FOR_CRM = "Ready for CRM";
+
+/** The shape Notion answers a query in. It goes no further than this module. */
+interface NotionText {
+  plain_text?: string;
+}
+
+interface NotionProperty {
+  title?: NotionText[];
+  rich_text?: NotionText[];
+  url?: string | null;
+  email?: string | null;
+  select?: { name?: string } | null;
+  status?: { name?: string } | null;
+  date?: { start?: string } | null;
+}
+
+interface NotionPage {
+  properties?: Record<string, NotionProperty | undefined>;
+}
+
+/** One row of the Notion export: its property names against plain values. */
+export type SourceRow = Record<string, string | null>;
+
+/**
+ * A `data_sources/{id}/query`, followed to the end. Notion pages the answer and
+ * both callers read all of it — a count that stopped at a hundred, or a batch
+ * missing its last rows, would simply be wrong.
+ */
+async function* queryPages(
+  accessToken: string,
+  dataSourceId: string,
+  filter: unknown,
+  clause: string,
+): AsyncGenerator<NotionPage> {
+  let cursor: string | undefined;
+  do {
+    const res = await notionPost(
+      `Bearer ${accessToken}`,
+      `/v1/data_sources/${dataSourceId}/query`,
+      { filter, page_size: 100, ...(cursor && { start_cursor: cursor }) },
+    );
+    await throwForStatus(res, clause);
+    const body = (await res.json()) as {
+      results?: NotionPage[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    };
+    yield* body.results ?? [];
+    cursor = body.has_more ? (body.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+}
+
+/** Whatever the property holds, as the text a person reads in Notion. */
+function plainValue(property: NotionProperty | undefined): string | null {
+  if (!property) return null;
+  const rich = property.title ?? property.rich_text;
+  if (rich) return rich.map((piece) => piece.plain_text ?? "").join("") || null;
+  return (
+    property.url ??
+    property.email ??
+    property.select?.name ??
+    property.status?.name ??
+    property.date?.start ??
+    null
+  );
+}
+
+/**
+ * The `Batch` of every row waiting for the CRM — the status leg of the filter,
+ * on its own. Notion's page shape stops here: the caller counts names.
  */
 export async function queryReadyBatches(
   accessToken: string,
   dataSourceId: string,
 ): Promise<string[]> {
   const batches: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const res = await notionPost(
-      `Bearer ${accessToken}`,
-      `/v1/data_sources/${dataSourceId}/query`,
-      {
-        filter: { property: "CRM status", status: { equals: "Ready for CRM" } },
-        page_size: 100,
-        ...(cursor && { start_cursor: cursor }),
-      },
-    );
-    await throwForStatus(res, "asked for the rows ready for the CRM");
-    const body = (await res.json()) as {
-      results?: { properties?: { Batch?: { select?: { name?: string } } } }[];
-      has_more?: boolean;
-      next_cursor?: string | null;
-    };
-    for (const row of body.results ?? []) {
-      // `Batch` is a select, and an unset one belongs to no run.
-      const name = row.properties?.Batch?.select?.name;
-      if (name) batches.push(name);
-    }
-    cursor = body.has_more ? (body.next_cursor ?? undefined) : undefined;
-  } while (cursor);
+  for await (const page of queryPages(
+    accessToken,
+    dataSourceId,
+    { property: "CRM status", status: { equals: READY_FOR_CRM } },
+    "asked for the rows ready for the CRM",
+  )) {
+    // `Batch` is a select, and an unset one belongs to no run.
+    const name = page.properties?.Batch?.select?.name;
+    if (name) batches.push(name);
+  }
   return batches;
+}
+
+/**
+ * The rows one run works on: both legs of the extraction filter this time.
+ * A source row leaves here as its property names against plain values — the
+ * pipeline's input, and the last place Notion's page shape is visible.
+ */
+export async function queryBatchRows(
+  accessToken: string,
+  dataSourceId: string,
+  batch: string,
+): Promise<SourceRow[]> {
+  const rows: SourceRow[] = [];
+  for await (const page of queryPages(
+    accessToken,
+    dataSourceId,
+    {
+      and: [
+        { property: "CRM status", status: { equals: READY_FOR_CRM } },
+        { property: "Batch", select: { equals: batch } },
+      ],
+    },
+    `asked for the rows in ${batch}`,
+  )) {
+    rows.push(
+      Object.fromEntries(
+        Object.entries(page.properties ?? {}).map(([name, property]) => [
+          name,
+          plainValue(property),
+        ]),
+      ),
+    );
+  }
+  return rows;
 }
 
 /**

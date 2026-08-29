@@ -7,11 +7,8 @@
 import { Router } from "express";
 import { ApiError } from "../errors.ts";
 import { revokeToken } from "../notion.ts";
-import {
-  deleteConnection,
-  readConnection,
-  runsAwaitingConfirmation,
-} from "../store.ts";
+import { runsAwaitingConfirmation } from "../runs.ts";
+import { deleteConnection, readConnection } from "../store.ts";
 
 const router = Router();
 
@@ -41,7 +38,7 @@ router.delete("/", async (_req, res) => {
   }
   // Named before the row goes: after the grant is gone these runs can never
   // write their outcome back to Notion.
-  const strandedRuns = runsAwaitingConfirmation();
+  const strandedRuns = await runsAwaitingConfirmation();
   await revokeToken(connection.access_token);
   deleteConnection();
   res.json({ disconnected: true, strandedRuns });
