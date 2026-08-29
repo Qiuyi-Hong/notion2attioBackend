@@ -1,18 +1,22 @@
 /**
- * `/api/runs` — starting a run, watching it move, and ending it.
+ * `/api/runs` — starting a run, watching it move, answering its first pause,
+ * and ending it.
  *
- * The two pauses (`/review`, `/confirm`) and the file download are not here
- * yet; they arrive with the tickets that give them something to carry.
+ * The second pause (`/confirm`) and the file download are not here yet; they
+ * arrive with the tickets that give them something to carry.
  *
  * `docs/http-contract.md` owns the payloads, the states and the error shape.
  */
 
 import { Router } from "express";
+import * as z from "zod";
 import { ApiError } from "../errors.ts";
+import { Decision } from "../review.ts";
 import {
   cancelRun,
   continueRun,
   listRuns,
+  reviewRun,
   snapshotOf,
   startRun,
   statusOf,
@@ -57,6 +61,41 @@ router.get("/", async (_req, res) => {
 
 router.get("/:runId", async (req, res) => {
   res.json(await snapshotOf(requireRun(req.params.runId)));
+});
+
+/**
+ * The first pause, answered. One route carries all three of the reviewer's
+ * acts, because they are one decision: answers, holds and sparse edits.
+ *
+ * Structural bad input dies here, with `400`. Semantic bad input — a work
+ * email the reviewer typed that does not parse, or that another Person
+ * candidate already holds — does not: the run re-interrupts and the problem
+ * appears on the candidate in the ledger, which is the surface they are
+ * looking at.
+ */
+router.post("/:runId/review", async (req, res) => {
+  const run = requireRun(req.params.runId);
+
+  const decision = Decision.safeParse(req.body ?? {});
+  if (!decision.success) {
+    throw new ApiError("invalid_payload", 400, z.prettifyError(decision.error));
+  }
+
+  const outcome = await reviewRun(run, decision.data);
+  if ("wrongStage" in outcome) {
+    throw new ApiError(
+      "wrong_stage",
+      409,
+      `This run is ${outcome.wrongStage}.`,
+    );
+  }
+  if ("invalid" in outcome) {
+    throw new ApiError("invalid_payload", 400, outcome.invalid);
+  }
+
+  // The ledger their decision produced, so a refusal reaches them in the same
+  // answer rather than on the next poll.
+  res.json(await snapshotOf(run));
 });
 
 /**

@@ -229,6 +229,9 @@ test("an account on two rows asks once whether it is one opportunity", async () 
           kind: "decision",
           override: false,
           siblings: [],
+          // Unanswered, and refused nothing: the review has not run (#54).
+          cleared: false,
+          refused: null,
         },
       ],
       "one decision Warn, not one per source row",

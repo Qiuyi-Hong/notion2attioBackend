@@ -23,6 +23,15 @@ export const errorHandler = (
     });
     return;
   }
+  // Body-parser's own failure, before any route sees the request. Malformed
+  // JSON is the first line of the contract's structural list, and it is
+  // `invalid_payload` wherever it arrives rather than on one route's say-so.
+  if (err instanceof SyntaxError && "body" in err) {
+    res.status(400).json({
+      error: { code: "invalid_payload", message: "Malformed JSON." },
+    });
+    return;
+  }
   console.error(err);
   res.status(500).json({
     error: { code: "internal_error", message: "Internal Server Error" },

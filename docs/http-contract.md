@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), and the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), the deterministic flags on those candidates ([#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53)), and the reviewer's decision document answering them ([#54](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/54)), are built. The second pause and the file download are not: `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
 
 ## What was already fixed before this ticket
 
@@ -143,6 +143,8 @@ We persist no failure record of our own, so **after a restart a `failed` run rea
 
 The run reaches `awaiting_confirmation` **as soon as the files exist**, not when they are downloaded. A download is a repeatable `GET`.
 
+Until [#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56) puts `emit` after `review`, an answered review runs the graph to its end and the run reads `done` — which is what "the graph ran to the end" means and is read off the checkpoint, not stored. It is a temporary overstatement of `done`'s meaning, and it temporarily releases the batch a run has answered. Nothing has reached Attio yet for a second run to duplicate, and `emit` closes it by standing between the two.
+
 `abandoned` is terminal but is **not** `done`. The distinction is load-bearing against [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13)'s one-live-run-per-batch guard ([PR #39](https://github.com/Qiuyi-Hong/notion2attioBackend/pull/39)), under which only a `done` run releases its batch: an abandoned run leaves rows reading `Ready for CRM` whose deals are **already in Attio**, so releasing the batch would let the next run emit those deals a second time. The batch stays reserved until a person sets those rows to `Imported` in Notion by hand and deletes the run — `DELETE /api/runs/:runId` is the explicit release. See [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md).
 
 Two exits from `awaiting_confirmation` assert opposite things and must not be conflated: **cancelling** (#13's meaning — *these files did not reach Attio*) and **abandoning** (*they did, and I am giving up on marking Notion*).
@@ -156,7 +158,7 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
   runId, batch, status, createdAt,
   next:       nodeId[],   // the checkpoint's pending node — progress, derived
   candidates: { companies: [...], people: [...], deals: [...] },  // per #10
-  batchFlags: [{ id, rule, level, kind, stage }],
+  batchFlags: [{ id, rule, level, kind, stage, cleared, refused }],
   repairs:    [...],      // the repair log, shown in place
   files:      [{ fileId, filename, bytes }] | null,
   writeBack:  { written: sourceId[], failed: [{ sourceId, cause }] } | null,
@@ -170,12 +172,16 @@ Node-level is the only granularity on offer. The notes screener is one node maki
 
 `candidates` is grouped by the Attio object each candidate becomes, because the ledger is read that way and Attio imports one file per object. A Person carries a reference to its Company rather than a copy of it, and a Deal carries no name — reach-through and derived values resolve when the files are written ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
 
-Every candidate carries its own **`flags`** array — `{ id, rule, level, kind, override, siblings }` — because a flag attaches to a candidate and never to a source row ([ADR-0001](./adr/0001-flags-attach-to-candidate-records.md)). There is no top-level `flags` key: a flag has nowhere a source row could go.
+Every candidate carries its own **`flags`** array — `{ id, rule, level, kind, override, siblings, cleared, refused }` — because a flag attaches to a candidate and never to a source row ([ADR-0001](./adr/0001-flags-attach-to-candidate-records.md)). There is no top-level `flags` key: a flag has nowhere a source row could go.
 
 - `rule` names the rule that raised it, and is what the surface renders a fixed sentence for. No prose travels on the wire, which is also what keeps the screener's model unable to narrate ([ADR-0002](./adr/0002-a-model-may-only-raise-a-flag.md)).
 - `level` is `stop` or `warn`; `kind` is `decision` or `notice` on a Warn and `null` on a Stop.
 - `override` says whether the reviewer may force past it — a question only a Stop asks, since a Warn excludes nothing and so has nothing to force past. It is `false` on every Warn, and on `D1`, the one Stop that can never be forced ([ADR-0005](./adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md)).
 - `siblings` names the candidates that _caused_ the flag, by id rather than by name, where that is not the candidate carrying it. A person's name lives on their own candidate and is never copied. It is a list because one flag is one _problem_: a Deal whose account two People leave incomplete carries **one** `D1` naming both, not one Stop each.
+- `cleared` is whether it has been answered, through its own control — the one thing about a flag the freeze lets move. `D1` is the exception that proves it: it has no control, and is cleared by its account becoming whole.
+- `refused` names an answer that did not stand — `invalid_email`, `duplicate_email` or, on the batch flag, `new_owner` — and is `null` otherwise. It is how a semantic failure reaches the reviewer *on the candidate*, in the ledger, instead of as a `400` on a response they will never see again.
+
+Every candidate also carries **`held`** and **`overrides`**. `held` is candidate state, read off the candidate's flags and the reviewer's holds and never typed in: a candidate carrying an uncleared Stop is Held, so is one the reviewer held, and so is every candidate in a Company's account when the Company is. It is computed **server-side, in one place**, because the browser deriving the same rule would let the two disagree — and the cascade is the one that decides what reaches Attio. `overrides` names the fields the reviewer pinned: an edit differing from what the pipeline proposed stops following whatever it was derived from, which is what makes ADR-0004's third provenance mark visible instead of hidden.
 
 The candidate set and the flag set are fixed the moment `check` completes, so a poll never returns a different set of either ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)). What _is_ answered changes; which flags exist does not.
 
@@ -204,6 +210,34 @@ There is one entry per source row repaired, so a candidate several rows collapse
 `edits` is **sparse** for a reason that is not about size. [#10](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/10) shows every silent repair in place with the original value on hover. If the browser posted whole candidates, the server could not tell *"the reviewer retyped the same value"* from *"the reviewer never touched it"* — so a repair would either lose its marking or keep it falsely. Sparse edits make **touched** a fact rather than an inference.
 
 This is also why the payload is not a patch of *rows*: [#6](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/6) attaches flags to candidates, and the reviewer edits candidates.
+
+`held` and `answers` are **not** sparse. They are what the reviewer decided, and a decision left out of the document is one they did not make. Holding a Company holds its People and its Deal — `held` need name only the Company, and the cascade is the server's ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
+
+**What is editable.** Every field the files carry, except the two a candidate's identity is keyed on:
+
+| Object | Editable |
+| --- | --- |
+| Company | `name`, `segment`, `primaryLocation` — never `domain` |
+| Person | `name`, `jobTitle`, `linkedIn`, `leadSource` — never `email` |
+| Deal | `owner` |
+
+Editing a key would not change a value; it would change *which candidates exist*, and Attio would upsert two person lines onto one record, last line winning. The one identity change the freeze permits happens through `B1`'s own control below.
+
+**What an answer is.** One of three shapes, and the flag decides which of them it takes:
+
+| Answer | Means | Taken by |
+| --- | --- | --- |
+| `true` | Answered, with nothing to supply | any Warn; a Stop whose `override` is `true`, which forces past it |
+| `{ email }` | The work email the Stop asked for — the one identity change | `B1` |
+| `{ stage }` | A `Deal stage` other than the proposed one | the batch flag `P1+P2` |
+
+`D1` takes none of them: it is the one Stop with no control, cleared by its account becoming whole, and an answer addressed to it is `invalid_payload`.
+
+**What comes back.** `200` and the snapshot the decision produced, so a refusal reaches the reviewer in the same answer rather than on the next poll. A refused answer leaves the run at `awaiting_review` — the run re-interrupts, and the ledger it comes back with is the reviewer's own work with the problem marked on the flag they answered.
+
+**The batch flag's answer covers the batch**, not the candidates that were sendable when it was given, so a Deal that clears afterwards is covered by the same answer and any count beside the flag simply moves ([#40](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/40)). It re-opens for one reason — `refused: "new_owner"` — when a Deal becomes sendable under an owner the answer did not name. A count that moves is not a reason to ask again; a name on a record Attio always creates and nobody can undo is.
+
+**This route is deliberately unguarded on the Connection's workspace.** Nothing between `review` and `emit` touches Notion, and the block would clear the moment the original workspace were connected again, so stopping the reviewer mid-triage would save no work ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)).
 
 ### The attestation — `POST /api/runs/:runId/confirm`
 
@@ -239,9 +273,9 @@ Serves the **stored bytes from the checkpoint**. It never regenerates the file, 
 
 The resume value arrives straight from a browser. Two kinds of bad input get two different answers.
 
-**Structural — rejected at the edge, never reaches the graph.** Malformed JSON, an unknown `candidateId`, an unknown `flagId`, a field that is not editable. A Zod schema at the route boundary returns `400`.
+**Structural — rejected at the edge, never reaches the graph.** Malformed JSON, an unknown `candidateId`, an unknown `flagId`, a field that is not editable, an answer a flag has no control for. A Zod schema at the route boundary returns `400`; the shapes that need the run's own ledger to judge are checked against it in the same breath, under the same code. Malformed JSON never reaches a route at all — body-parser fails first, so it is mapped to `invalid_payload` once, in the error handler, rather than on each route's say-so.
 
-**Semantic — goes back into the graph as a flag.** The reviewer types an email address that still does not parse. The review node re-interrupts and the problem appears on the candidate in the ledger, where the reviewer is already working. A `400` here would be the API correcting the reviewer somewhere other than the surface they are looking at.
+**Semantic — goes back into the graph as a flag.** The reviewer types an email address that still does not parse, or one another Person candidate in the batch already holds. The review node re-interrupts and the problem appears on the candidate in the ledger, where the reviewer is already working, as `refused` on the flag they answered. A `400` here would be the API correcting the reviewer somewhere other than the surface they are looking at.
 
 The load-bearing half is that **an edit is validated, not re-checked**. [ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md) settled [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31) and amends what this contract first said here: validation runs on the edited value, where it lands, and `check` never runs a second pass. Laundering is then structurally impossible rather than defended against — the candidate set and the flag set are frozen the moment `check` completes, so a flag is cleared only by answering it through its own control, never by editing a cell near it.
 

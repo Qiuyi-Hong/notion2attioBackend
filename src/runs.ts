@@ -12,7 +12,10 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { Command } from "@langchain/langgraph";
 import { checkpointer, graph } from "./graph.ts";
+import type { CheckedLedger } from "./flags.ts";
+import { type Decision, structuralProblem } from "./review.ts";
 import {
   deleteRun,
   insertRun,
@@ -39,6 +42,9 @@ const threw = new Set<string>();
 
 /** Batches whose guard is being decided right now, against the run deciding it. */
 const claiming = new Map<string, string>();
+
+/** Runs whose resume is being decided right now — the per-run lock (#3). */
+const resuming = new Set<string>();
 
 const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
 
@@ -153,7 +159,7 @@ async function runHolding(batch: string): Promise<RunRecord | undefined> {
  * runs, so a process killed inside that node still leaves a run something can
  * be continued from.
  */
-async function work(runId: string, input: { batch: string } | null) {
+async function work(runId: string, input: Parameters<typeof graph.invoke>[0]) {
   working.add(runId);
   threw.delete(runId);
   try {
@@ -196,6 +202,51 @@ export async function startRun(
     return { run };
   } finally {
     claiming.delete(batch);
+  }
+}
+
+/**
+ * The reviewer's decision document, into the run it belongs to.
+ *
+ * Three things have to be true before the graph sees it, and they are decided
+ * here rather than in the route because deciding them means reading the
+ * checkpoint — which is one read, and the same read the guard and the ledger
+ * both need.
+ *
+ * The claim is taken **before the first `await`**, so a double-submitted
+ * review cannot apply twice: the second request finds the run either claimed
+ * or already moved past the pause, and the stage guard refuses it either way.
+ *
+ * It carries **no workspace check**. Nothing between `review` and `emit`
+ * touches Notion, and the block would clear the moment the original workspace
+ * were connected again, so stopping the reviewer mid-triage would save no work
+ * (ADR-0008).
+ *
+ * ponytail: the claim is this process's, the same single-process ceiling the
+ * batch guard has. The write node's re-query is the one guard that holds
+ * across two processes, and it is #57's.
+ */
+export async function reviewRun(
+  run: RunRecord,
+  decision: Decision,
+): Promise<{ ok: true } | { wrongStage: RunStatus } | { invalid: string }> {
+  if (resuming.has(run.runId)) return { wrongStage: "running" };
+  resuming.add(run.runId);
+  try {
+    const state = await graph.getState(configFor(run.runId));
+    const status = statusFrom(run.runId, state);
+    if (status !== "awaiting_review") return { wrongStage: status };
+
+    const problem = structuralProblem(state.values as CheckedLedger, decision);
+    if (problem) return { invalid: problem };
+
+    // Awaited: the review node is pure and the run's next stop is close, so
+    // the reviewer is answered with the ledger their decision produced —
+    // including a refusal, which is the whole point of re-interrupting.
+    await work(run.runId, new Command({ resume: decision }));
+    return { ok: true };
+  } finally {
+    resuming.delete(run.runId);
   }
 }
 

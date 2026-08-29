@@ -32,6 +32,7 @@ import {
 import config from "./config/config.ts";
 import { BatchFlag, checkFlags } from "./flags.ts";
 import { findSharedDataSource, queryBatchRows } from "./notion.ts";
+import { applyDecision, type Decision, wasRefused } from "./review.ts";
 import { readConnection } from "./store.ts";
 
 /**
@@ -98,13 +99,20 @@ const check: GraphNode<typeof State> = (state) =>
   checkFlags(state, config.dealStage);
 
 /**
- * The first pause. An interrupted node re-runs from the top on resume, so this
- * one holds the `interrupt()` and nothing else — no read, no write, no log.
+ * The first pause, and the reviewer's decision landing on it (#54).
+ *
+ * An interrupted node re-runs from the top on resume, so this one holds the
+ * `interrupt()` and one pure function — no read, no write, no log. The
+ * document arrives already validated structurally, at the route: this side of
+ * the resume is where the ledger is, and nothing here re-enters `check`.
+ *
+ * The `interrupt()` is called **once** per invocation and never conditionally.
+ * A refused answer routes the run back to this node rather than looping inside
+ * it, which is the pattern `docs/research/langgraph-hitl.md` verified: each
+ * resume replays every earlier iteration of an in-node loop.
  */
-const review: GraphNode<typeof State> = () => {
-  interrupt({ kind: "review" });
-  return {};
-};
+const review: GraphNode<typeof State> = (state) =>
+  applyDecision(state, interrupt({ kind: "review" }) as Decision);
 
 // `SqliteSaver` opens the file eagerly, and `store.ts` cannot be relied on to
 // have created the directory first.
@@ -125,5 +133,15 @@ export const graph = new StateGraph(State)
   .addEdge("read", "transform")
   .addEdge("transform", "check")
   .addEdge("check", "review")
-  .addEdge("review", END)
+  /**
+   * Back to the pause when an answer was refused, so the problem appears on
+   * the candidate in the ledger where the reviewer is already working — never
+   * as a `400` on a response they will never see again. The ledger this leaves
+   * behind is the reviewer's own work, so nothing they got right is lost.
+   */
+  .addConditionalEdges(
+    "review",
+    (state) => (wasRefused(state) ? "review" : END),
+    ["review", END],
+  )
   .compile({ checkpointer });
