@@ -1,8 +1,9 @@
-# ADR-0003: The candidate set is frozen at the check pass
+# ADR-0004: The candidate set is frozen at the check pass
 
 - **Status:** Accepted
 - **Date:** 2026-08-29
 - **Ticket:** [What happens when a reviewer edits a value the transform derived from?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31)
+- **Amends:** the `Reviewer edit` term introduced by [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) (see *What this amends*)
 
 ## Context
 
@@ -24,7 +25,7 @@ The W34 batch supplies the other half of the argument. All eight source rows car
 
 Freeze fixes **which candidates exist** and **which flags exist**. It does not stop one value from following another.
 
-The candidate set and the flag set are fixed the moment `check` completes. The ledger edits values on candidates; it is a draft of the two files, not a live view of a running transform. Nothing the reviewer types can create, destroy or re-key a candidate.
+The candidate set and the flag set are fixed the moment `check` completes. The ledger edits values on candidates; it is a draft of the handoff bundle, not a live view of a running transform. Nothing the reviewer types can create, destroy or re-key a candidate.
 
 - **The two identity-bearing values are read-only.** A Company candidate's normalised domain and a Person candidate's work email cannot be typed in the table. Identity changes only ever happen through a flag's own control, as the B1 Stop already does. This narrows #10's "everything is editable" to *every field the files carry, except the two the identity is keyed on*.
 - **The one identity change we allow is validated where it happens.** The B1 control checks the supplied work email against every other Person candidate in the batch and refuses a duplicate. This is input validation on one control at resume time, not a second check pass — but without it, freeze could knowingly emit two person lines that Attio would collapse onto one record, last line winning.
@@ -36,6 +37,22 @@ The candidate set and the flag set are fixed the moment `check` completes. The l
 - **A reviewer's correction never returns to Notion.** The connection has update capability ([#14](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/14)) and [#7](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/7) uses it, but only for `CRM status`. A value typed to release an export is not a correction offered to the source of truth; they are different acts and only one of them was consented to.
 
 The run therefore has two freeze points, and both are easy to state: **`check` completes and the candidates are fixed; export completes and the values are fixed.**
+
+## What this amends
+
+[#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) settled the HTTP contract while this ticket was open, and introduced the `CONTEXT.md` term **Reviewer edit** to carry a rule it needed: *editing a flagged value must not become a way to launder the flag away.* It expressed that rule as **"an edit is not a correction applied to the output — it is a new input"**, going *"back through the pipeline's checks"*, able to *"clear a flag"* and *"raise a new one"*. #16 also deferred explicitly: *"what gets re-derived is #31's."*
+
+Taken literally, that sentence is the re-derivation this ADR rejects, and it re-enters `check` — the one node [#9](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/9) placed the model call inside precisely so it could not run under the reviewer.
+
+The rule #16 actually needed survives; the mechanism it named does not. **An edit is validated, not re-checked.**
+
+- **Validation runs on the edited value, where it lands.** A work email that does not parse, or that collides with another Person candidate in the batch, comes back as a flag in the ledger — #16's re-interrupt, kept exactly as specified. This is input validation on one control, not a second check pass.
+- **`check` does not run again.** No new flag appears, no candidate is created or destroyed, and the model call is not repeated.
+- **Laundering is structurally impossible rather than defended against.** A flag is cleared by *answering it*, through the flag's own control — never by editing a table cell near it. Since the flag set is frozen, editing around a flag cannot make it disappear.
+
+One distinction the freeze depends on: what is frozen is **which flags exist**, not whether each is answered. Answering a Stop clears it — that is the entire point of the review. What cannot happen is a flag appearing on, or vanishing from, a candidate because of something the reviewer typed.
+
+`Reviewer edit` stays the noun, since #16 shipped it; this ADR's own term **override** is folded into it as what an edit *does* to a derived value. Two nouns for one concept is what the glossary exists to prevent.
 
 ## Consequences
 
@@ -51,7 +68,9 @@ The run therefore has two freeze points, and both are easy to state: **`check` c
 
 **The same question is answered every week, for ever.** Tern Mobility's row returns next batch with no work email and Stops again; an override is lost with the run that produced it, since nothing of ours persists between batches. The pipeline can fix the file it emits and cannot fix Notion. The write-up says so rather than quietly closing the gap.
 
-**`CONTEXT.md` gains three terms and loses one overstatement.** **Derived value**, **override** and **hold** are new. Candidate state was defined as derived from a candidate's flags and "never set directly" — untrue since #10 gave the reviewer a hold control on every candidate, and further untrue now that a Company's hold reaches its People. It is restated as *read off a candidate's flags and holds*.
+**`CONTEXT.md` gains two terms, rewrites one, and loses one overstatement.** **Derived value** and **hold** are new; **reviewer edit** is rewritten as above. Candidate state was defined as derived from a candidate's flags and "never set directly" — untrue since #10 gave the reviewer a hold control on every candidate, and further untrue now that a Company's hold reaches its People. It is restated as *read off a candidate's flags and holds*.
+
+**Three ADRs are numbered 0003.** [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) and [#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29) each landed one concurrently, and this one was drafted as a third. It takes 0004; the remaining collision between the other two is left for whoever owns them, since renumbering a merged ADR breaks the links already pointing at it.
 
 ## Alternatives considered
 
