@@ -52,6 +52,8 @@ A change the pipeline makes to a value without asking anyone. A repair is silent
 
 Anything that would create, merge or discard a candidate, or that would assert a fact the pipeline does not hold, is not a silent repair. It is a flag.
 
+A silent repair never applies to a **reviewer edit**. The pipeline repairs what Notion gave it, not what the reviewer typed: a value that changed the instant it was entered has no earlier state to compare it with, so its history would say nothing.
+
 A language model's reading of a value is never a silent repair. It is neither deterministic nor reversible, and it asserts something the pipeline was not given. A model can therefore only raise a flag. It never changes a value the reviewer will send.
 
 ## Flag
@@ -83,13 +85,25 @@ A flag is a batch flag because of *when the reviewer answers it*, not because of
 
 ## Candidate state
 
-Derived from a candidate's flags — never set directly.
+Read off a candidate's flags and holds — never typed in as a value.
 
 - **Clear** — no flags. Goes into the files.
 - **Needs decision** — one or more Warns. Goes into the files once the reviewer has answered every Warn.
-- **Held** — one or more Stops. Stays out of the files.
+- **Held** — stays out of the files. A candidate is Held for any of three reasons: it carries a Stop; the reviewer held it; or its Company candidate is Held.
 
 These replace the working sheet's `READY` and `CHECK`. `READY` becomes `Clear`. `CHECK` splits: a missing work email becomes `Held`; everything the old rule missed becomes `Needs decision`.
+
+## Derived value
+
+A value the pipeline calculates from another value rather than reading from a source row. A Deal candidate's name is derived from its Company candidate's name.
+
+A derived value lives in exactly one place — on the candidate that owns it — and reaches the import files when they are written. It is never copied onto a second candidate, so it can never go stale in one place and stay correct in another.
+
+## Hold
+
+The reviewer's act of keeping a candidate out of the handoff bundle. Distinct from a Stop, which is the pipeline's judgement; a hold is the reviewer's, needs no reason, and is available on every candidate.
+
+A hold on a Company candidate reaches its People and its Deal, because a person line would otherwise create the company in Attio anyway. A hold on a Person or a Deal candidate reaches nothing else.
 
 ## Reviewer
 
@@ -97,9 +111,15 @@ The one person who works through a batch's flags, with full authority to decide.
 
 ## Reviewer edit
 
-A value the reviewer changes by hand while working a batch. An edit is not a correction applied to the output — it is a new input.
+A value the reviewer changes by hand while working a batch. The counterpart to a **silent repair**: a repair is what the pipeline changed without asking, an edit is what a human changed having been asked.
 
-An edit therefore goes back through the pipeline's checks, exactly as the value it replaces did. It can clear a flag, and it can raise a new one; what it can never do is bypass a check. Editing a flagged value is not a way to answer the flag.
+An edit changes the **output** — the candidate a file will be written from. It cannot create, destroy or re-key a candidate, and it cannot make a flag appear or disappear. Editing a flagged value is not a way to answer the flag: what clears a flag is answering it, through the flag's own control.
+
+An edit is nonetheless **validated** where it lands, and a value that fails validation comes back as a flag in the ledger rather than reaching a file. That is what stops an edit bypassing a check.
+
+An edit is taken exactly as typed, and it **overrides** whatever the value was derived from — pinning it, so that no later change elsewhere can overwrite it. A value counts as overridden only when it differs from what the pipeline proposed; re-typing the same value changes nothing.
+
+The reviewer cannot edit the values a candidate's identity is keyed on: a Company candidate's normalised domain and a Person candidate's work email. Those change only through a flag's own control.
 
 This is the reviewer-facing counterpart of the rule on silent repairs. The pipeline may not assert a fact it does not hold, and the reviewer may not assert one either without the pipeline looking at it.
 
