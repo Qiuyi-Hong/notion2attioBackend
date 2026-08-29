@@ -12,7 +12,7 @@ not trust a copy that was not produced against a live workspace.
 
   | file                             | encoding           | line endings | delimiter | asks                                           |
   | -------------------------------- | ------------------ | ------------ | --------- | ---------------------------------------------- |
-  | `probe-a-utf8-lf-comma.csv`      | UTF-8, no BOM      | LF           | `,`       | does what we intend to emit survive?           |
+  | `probe-a-utf8-lf-comma.csv`      | UTF-8, no BOM      | LF           | `,`       | is LF accepted as well as Attio's CRLF?        |
   | `probe-b-utf8bom-crlf-comma.csv` | UTF-8 **with BOM** | CRLF         | `,`       | does an Excel-shaped file break the header?    |
   | `probe-c-utf8-lf-semicolon.csv`  | UTF-8, no BOM      | LF           | `;`       | is a semicolon file understood, or one column? |
 

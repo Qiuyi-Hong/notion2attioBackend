@@ -496,7 +496,7 @@ function cmdCsv() {
       name: "probe-a-utf8-lf-comma.csv",
       rows: rowsA,
       opts: { delimiter: ",", eol: "\n", bom: false },
-      what: "UTF-8, no BOM, LF, comma — exactly what we intend to emit",
+      what: "UTF-8, no BOM, LF, comma — the LF variant of what we emit",
     },
     {
       name: "probe-b-utf8bom-crlf-comma.csv",

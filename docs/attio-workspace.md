@@ -113,9 +113,11 @@ into a field Attio would otherwise keep current, and it does so silently. The
 best case is that our value matches a label and blocks better data; the worst is
 that it does not match, the cell is dropped, and the mapping did nothing at all.
 
-**Recommendation: do not emit `Employee range`.** If the source value is worth
-keeping, it belongs in a custom attribute (options are freely creatable there),
-not in Attio's enriched one.
+**Decided: we do not emit `Employee range`.** The sheet's
+`Employees → Employee range` mapping is dropped. If the source value is ever
+judged worth keeping, it belongs in a custom attribute (options are freely
+creatable there), not in Attio's enriched one — but that adds a schema setup
+step in Maya's workspace and buys nothing Attio is not already doing.
 
 Consequence for the transform: the `51–200` / `51-200` dash split stops being an
 Attio problem. It remains a _Notion_ data-quality observation worth surfacing in
@@ -131,6 +133,7 @@ creates a workspace. If that ever happens, `npm run attio:setup` enumerates the
 option labels and settles question 3 empirically in about five minutes. See
 [`data/attio-probes/README.md`](../data/attio-probes/README.md).
 
-One correction to make if it is ever run: the harness was written before the
-template inspection, so it labels UTF-8/LF/comma as "what we intend to emit". It
-is CRLF, per the templates.
+The harness predates the template inspection, so probe A tests the **LF**
+variant. That is now the interesting question rather than the default one: we
+emit CRLF to match Attio's templates, and probe A would tell us whether LF is
+accepted too.
