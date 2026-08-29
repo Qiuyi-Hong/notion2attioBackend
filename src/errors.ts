@@ -9,6 +9,7 @@ export type ErrorCode =
   | "not_connected"
   | "wrong_workspace"
   | "no_such_run"
+  | "no_such_file"
   | "wrong_stage"
   | "batch_in_progress"
   | "invalid_payload"

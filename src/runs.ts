@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { Command } from "@langchain/langgraph";
 import { checkpointer, graph } from "./graph.ts";
+import type { HandoffFile } from "./emit.ts";
 import type { CheckedLedger } from "./flags.ts";
 import { type Decision, structuralProblem } from "./review.ts";
 import {
@@ -48,6 +49,10 @@ const resuming = new Set<string>();
 
 const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
 
+/** The bundle in a checkpoint's values, or `null` before `emit` has run. */
+const filesIn = (values: { files?: HandoffFile[] | null }) =>
+  values.files ?? null;
+
 /**
  * Read off the checkpoint's pending tasks, in this order:
  *
@@ -70,10 +75,14 @@ function statusFrom(
 ): RunStatus {
   if (working.has(runId)) return "running";
   if (threw.has(runId)) return "failed";
-  if (snapshot.tasks.some((task) => task.interrupts.length > 0)) {
-    // `review` is the only node that interrupts so far. The confirmation
-    // pause joins it with #57, and is told apart by the task's name.
-    return "awaiting_review";
+  // The two nodes that interrupt, told apart by the task's name. The second
+  // pause is reached the moment the files **exist** (#56) — not when they are
+  // downloaded, which is a repeatable `GET` that moves nothing.
+  const paused = snapshot.tasks.find((task) => task.interrupts.length > 0);
+  if (paused) {
+    return paused.name === "confirm"
+      ? "awaiting_confirmation"
+      : "awaiting_review";
   }
   if (!snapshot.createdAt || snapshot.next.length > 0) return "stalled";
   return "done";
@@ -118,11 +127,40 @@ export async function snapshotOf(run: RunRecord) {
     // a discarded quote is the one piece of model-authored text in the run.
     // Keeping it in the checkpoint is what makes #60's *the quote span is never
     // rendered* structural rather than a promise the browser has to keep.
-    // The three below stay null until they mean something.
-    files: null,
+    /**
+     * The bundle, named and measured but not carried: `bytes` is the size, and
+     * the bytes themselves come from `GET .../files/:fileId`. A snapshot the
+     * browser polls every second has no business carrying a ZIP.
+     *
+     * `null` until `emit` has run. `fileId` is opaque, so the file set can
+     * change without touching `docs/http-contract.md`.
+     */
+    files:
+      filesIn(values)?.map((file) => ({
+        fileId: file.fileId,
+        filename: file.filename,
+        bytes: Buffer.byteLength(file.content, "base64"),
+      })) ?? null,
+    // The two below stay null until they mean something.
     writeBack: null,
     blocked: null,
   };
+}
+
+/**
+ * One file of the handoff bundle, as the checkpoint stored it.
+ *
+ * The download **serves these bytes and never regenerates them**, so what is
+ * imported is provably what was reviewed — and downloading twice costs
+ * nothing, because nothing is made. It is a plain read: no lock, no stage
+ * guard, and no effect on the run.
+ */
+export async function fileFrom(
+  runId: string,
+  fileId: string,
+): Promise<HandoffFile | undefined> {
+  const { values } = await graph.getState(configFor(runId));
+  return filesIn(values)?.find((file) => file.fileId === fileId);
 }
 
 /** Every run the file holds, each against the status its checkpoint gives it. */
