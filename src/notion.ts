@@ -33,19 +33,28 @@ export function authorizeUrl(state: string): string {
   return `${API}/v1/oauth/authorize?${params}`;
 }
 
-export async function exchangeCode(code: string): Promise<Connection> {
-  const res = await fetch(`${API}/v1/oauth/token`, {
+/**
+ * Every Notion call below is the same POST: an Authorization header, JSON in,
+ * JSON out, and the version header the OAuth endpoints require as much as the
+ * resource ones. Only the auth scheme and the reading of a bad status differ,
+ * so those stay with the callers.
+ */
+const notionPost = (authorization: string, path: string, body: unknown) =>
+  fetch(`${API}${path}`, {
     method: "POST",
     headers: {
-      Authorization: basicAuth(),
+      Authorization: authorization,
       "Content-Type": "application/json",
       "Notion-Version": VERSION,
     },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.notion.redirectUri,
-    }),
+    body: JSON.stringify(body),
+  });
+
+export async function exchangeCode(code: string): Promise<Connection> {
+  const res = await notionPost(basicAuth(), "/v1/oauth/token", {
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.notion.redirectUri,
   });
   if (!res.ok) {
     throw new ApiError(
@@ -61,14 +70,34 @@ export async function exchangeCode(code: string): Promise<Connection> {
  * Whether the grant reaches any database at all. Notion's picker insists on at
  * least one page, but the user can pick pages holding nothing we can read —
  * which is a connected workspace with no batch in it, not a failure.
+ *
+ * This is the first use of the issued token, so it is also where a token that
+ * is already dead shows up: a `401` is `not_connected`, and the repair is
+ * authorising again.
  */
 export async function grantsAnyDataSource(
   accessToken: string,
 ): Promise<boolean> {
-  const body = (await notionRead(accessToken, "/v1/search", {
+  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
     filter: { property: "object", value: "data_source" },
     page_size: 1,
-  })) as { results?: unknown[] };
+  });
+  if (res.status === 401) {
+    throw new ApiError(
+      "not_connected",
+      409,
+      "The Notion connection has expired.",
+      { reason: "expired" },
+    );
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      "notion_failed",
+      502,
+      `Notion answered ${res.status} when asked what the grant covers.`,
+    );
+  }
+  const body = (await res.json()) as { results?: unknown[] };
   return (body.results ?? []).length > 0;
 }
 
@@ -77,14 +106,8 @@ export async function grantsAnyDataSource(
  * it, which is the outcome asked for — so it is not an error here.
  */
 export async function revokeToken(accessToken: string): Promise<void> {
-  const res = await fetch(`${API}/v1/oauth/revoke`, {
-    method: "POST",
-    headers: {
-      Authorization: basicAuth(),
-      "Content-Type": "application/json",
-      "Notion-Version": VERSION,
-    },
-    body: JSON.stringify({ token: accessToken }),
+  const res = await notionPost(basicAuth(), "/v1/oauth/revoke", {
+    token: accessToken,
   });
   if (!res.ok && res.status !== 401) {
     throw new ApiError(
@@ -93,43 +116,4 @@ export async function revokeToken(accessToken: string): Promise<void> {
       `Notion refused the revocation (${res.status}).`,
     );
   }
-}
-
-/**
- * A read with the Connection's own token. A `401` is the connection having
- * been withdrawn or expired under us: the answer is `not_connected`, and the
- * repair is authorising again.
- */
-async function notionRead(
-  accessToken: string,
-  path: string,
-  body: unknown,
-): Promise<unknown> {
-  const res = await fetch(`${API}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "Notion-Version": VERSION,
-    },
-    body: JSON.stringify(body),
-  });
-  if (res.status === 401) {
-    throw new ApiError(
-      "not_connected",
-      409,
-      "The Notion connection has expired.",
-      {
-        reason: "expired",
-      },
-    );
-  }
-  if (!res.ok) {
-    throw new ApiError(
-      "notion_failed",
-      502,
-      `Notion answered ${res.status} for ${path}.`,
-    );
-  }
-  return res.json();
 }

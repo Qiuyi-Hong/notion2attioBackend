@@ -42,9 +42,11 @@ router.get("/notion/callback", async (req, res) => {
   if (typeof code !== "string") return res.redirect(backToApp("failed"));
 
   try {
+    // Asked before the row is written, so `expired` and `failed` can both
+    // mean what the contract says they mean: nothing was stored.
     const connection = await exchangeCode(code);
-    saveConnection(connection);
     const shared = await grantsAnyDataSource(connection.access_token);
+    saveConnection(connection);
     return res.redirect(backToApp(shared ? "connected" : "no_databases"));
   } catch (thrown) {
     const expired =

@@ -262,6 +262,27 @@ test("a token Notion rejects on sight is reported as expired, not as a failure",
   const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
 
   assert.equal(outcomeOf(res), "expired");
+  assert.equal(
+    storedConnection(),
+    undefined,
+    "expired means nothing was stored",
+  );
+});
+
+test("a grant we cannot look into is stored nowhere", async () => {
+  // The look happens before the row is written, so an unreadable answer
+  // leaves the file exactly as `failed` promises: untouched.
+  notionScript["/v1/search"] = () => [500, { code: "internal_server_error" }];
+  const state = await startAuthorisation();
+
+  const res = await get(`/auth/notion/callback?code=the-code&state=${state}`);
+
+  assert.equal(outcomeOf(res), "failed");
+  assert.equal(
+    storedConnection(),
+    undefined,
+    "failed means nothing was stored",
+  );
 });
 
 test("a token exchange Notion refuses reports a failure", async () => {
