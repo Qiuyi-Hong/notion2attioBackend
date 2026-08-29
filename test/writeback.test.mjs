@@ -42,9 +42,18 @@ process.env.DATABASE_PATH = DB_PATH;
 process.env.NOTION_OAUTH_CLIENT_ID = "test-client-id";
 process.env.NOTION_OAUTH_CLIENT_SECRET = "test-client-secret";
 // No key: the notes are not read, and the batch says so with `N0`.
-delete process.env.OPENAI_API_KEY;
+//
+// **Assigned, never deleted.** `config.ts` runs `dotenv.config()`, which fills
+// in any variable that is *absent* from `process.env` — so a `delete` here
+// hands the screener whatever key the developer's own `.env` holds, and the
+// suite quietly starts billing a real model. An empty string is still present,
+// so dotenv leaves it alone.
+process.env.OPENAI_API_KEY = "";
 
 const { default: app } = await import("../src/app.ts");
+// The write node, entered directly for the one guard no route can reach.
+const { graph } = await import("../src/graph.ts");
+const { writeBackOf } = await import("../src/writeback.ts");
 
 const CARPE_LAB = {
   access_token: "ntn_live_token",
@@ -194,9 +203,15 @@ const post = (path, body) =>
 const snapshot = async (runId) =>
   (await fetch(`${base}/api/runs/${runId}`)).json();
 
+/**
+ * The budget is longer than the other suites' because this one is the slow
+ * neighbour: its write-backs pace themselves at ~3/s, and `node --test` runs
+ * the files side by side. Ten seconds is enough for the run and not always
+ * enough for the machine.
+ */
 async function paused(batch = TARGET_BATCH) {
   const { runId } = await (await post("/api/runs", { batch })).json();
-  for (let tries = 0; tries < 400; tries += 1) {
+  for (let tries = 0; tries < 1600; tries += 1) {
     const body = await snapshot(runId);
     if (body.status === "awaiting_review") return { runId, ...body };
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -464,6 +479,28 @@ test("a 429 honours Retry-After", async () => {
   );
 });
 
+test("a Retry-After longer than the foreground has is not waited out", async () => {
+  const run = await exported();
+  const limited = handedOffIds(run.ledger)[0];
+  faults.set(limited, () => [
+    429,
+    { object: "error" },
+    { "Retry-After": "3600" },
+  ]);
+
+  const started = Date.now();
+  const { body } = await confirm(run.runId);
+  const elapsed = Date.now() - started;
+
+  // Past a short budget the Retry button is the backoff (ADR-0007), so the
+  // row fails at once rather than holding the reviewer's request open.
+  assert.deepEqual(body.writeBack.failed, [
+    { sourceId: limited, cause: "rate_limited" },
+  ]);
+  assert.equal(patched().filter((id) => id === limited).length, 1);
+  assert.ok(elapsed < 10_000, `the write-back waited ${elapsed}ms`);
+});
+
 test("a 429 past its budget fails the row, and says why", async () => {
   const run = await exported();
   const limited = handedOffIds(run.ledger)[0];
@@ -564,16 +601,61 @@ test("the snapshot's blocked names both workspaces, before the click", async () 
   assert.ok(!wire.includes(DEMO_SPACE.workspace_id));
 });
 
-test("the write node refuses the wrong workspace too, for a run continue re-enters", async () => {
+/**
+ * The node's own check, which the confirm route can never exercise: a run left
+ * `stalled` at the write-back is re-entered through `continue`, and `continue`
+ * has no workspace guard of its own (ADR-0008 rule 5). So the node is entered
+ * directly, with the state a stalled run would carry.
+ *
+ * Going through `{ abandoned: true }` instead would prove nothing — that
+ * payload routes `confirm → END`, so the node never runs and no write could
+ * have happened either way.
+ */
+test("the write node refuses the wrong workspace itself, which is what continue meets", async () => {
   const run = await exported();
+  const handed = handedOffIds(run.ledger);
+  const { values } = await graph.getState({
+    configurable: { thread_id: run.runId },
+  });
   connect(DEMO_SPACE);
 
-  // `{ abandoned: true }` is the one payload the block does not refuse, so it
-  // is the only way to ask the graph anything at all here — the node's own
-  // check is what a `continue` past the route would meet.
-  const { body } = await confirm(run.runId, { abandoned: true });
-  assert.equal(body.status, "abandoned");
-  assert.deepEqual(patched(), []);
+  const result = await writeBackOf(values);
+
+  assert.deepEqual(
+    result.failed,
+    handed.map((sourceId) => ({ sourceId, cause: "wrong_workspace" })),
+  );
+  assert.deepEqual(result.written, []);
+  assert.deepEqual(patched(), [], "the node wrote despite the wrong workspace");
+});
+
+test("the node's refusal does not re-fail what an earlier pass already wrote", async () => {
+  const run = await exported();
+  const handed = handedOffIds(run.ledger);
+  const stubborn = handed.at(-1);
+  faults.set(stubborn, () => [503, { object: "error" }]);
+  const first = await confirm(run.runId);
+  assert.deepEqual(first.body.writeBack.failed, [
+    { sourceId: stubborn, cause: "notion_unavailable" },
+  ]);
+
+  // The original workspace is gone before the retry. Notion cannot be asked
+  // what already landed, so the run's own record of the first pass is what
+  // keeps six written rows out of the failure list the reviewer would take to
+  // Notion to repair by hand.
+  connect(DEMO_SPACE);
+  const { values } = await graph.getState({
+    configurable: { thread_id: run.runId },
+  });
+  const result = await writeBackOf(values);
+
+  assert.deepEqual(result.failed, [
+    { sourceId: stubborn, cause: "wrong_workspace" },
+  ]);
+  assert.deepEqual(
+    [...result.written].sort(),
+    handed.filter((id) => id !== stubborn).sort(),
+  );
 });
 
 test("connecting the same workspace again is not a different workspace", async () => {

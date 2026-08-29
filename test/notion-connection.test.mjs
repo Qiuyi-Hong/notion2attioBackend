@@ -13,7 +13,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -388,6 +388,9 @@ test("a grant Notion has already forgotten still disconnects", async () => {
  */
 const PACED = new Set(["writeback.ts"]);
 
+/** The path relative to `src/`, so the allowlist names one file and not a name. */
+const under = (root, path) => path.slice(root.length);
+
 test("no refresh loop exists anywhere in the codebase", () => {
   const root = fileURLToPath(new URL("../src/", import.meta.url));
   const walk = (dir) =>
@@ -400,7 +403,7 @@ test("no refresh loop exists anywhere in the codebase", () => {
     const source = readFileSync(path, "utf8");
     assert.ok(!/refresh_token/.test(source), `${path} reads the refresh token`);
     assert.ok(!/setInterval/.test(source), `${path} schedules a loop`);
-    if (PACED.has(basename(path))) continue;
+    if (PACED.has(under(root, path))) continue;
     assert.ok(!/setTimeout/.test(source), `${path} schedules work`);
   }
 });

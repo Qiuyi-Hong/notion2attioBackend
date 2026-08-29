@@ -107,8 +107,14 @@ const stageOf = (batchFlags: BatchFlag[]): string => {
   return flag.stage;
 };
 
-/** What the bundle carries: every Clear and answered candidate, and no Held one. */
-const sent = <T extends { held: boolean }>(candidates: T[]): T[] =>
+/**
+ * What the bundle carries: every Clear and answered candidate, and no Held one.
+ *
+ * Exported because the write-back asks the same question of the same
+ * candidates — *did this reach Attio?* — and `Imported` overstating is exactly
+ * what a second reading of `held` would eventually cause (ADR-0007).
+ */
+export const sent = <T extends { held: boolean }>(candidates: T[]): T[] =>
   candidates.filter((candidate) => !candidate.held);
 
 /**

@@ -20,10 +20,15 @@
  * `written` is derived — the handed-off rows minus the failures — rather than
  * accumulated across passes. A row that is no longer `Ready for CRM` was
  * marked, by an earlier pass or by a person, and either way it is written.
+ * `allFailed` is the one exception, and it is one because Notion cannot be
+ * asked there: with no token, or a token for the wrong workspace, the run's own
+ * record of an earlier pass is the only thing that keeps rows which did land
+ * out of the list the reviewer takes to Notion to repair by hand.
  */
 
 import * as z from "zod";
 import { candidateIdsOf } from "./candidates.ts";
+import { sent } from "./emit.ts";
 import { ApiError } from "./errors.ts";
 import type { CheckedLedger } from "./flags.ts";
 import {
@@ -47,6 +52,8 @@ import { readConnection } from "./store.ts";
  * to go and fix Notion by hand.
  */
 export const Cause = z.enum([
+  // No live Connection, or a live one whose grant reaches no database we can
+  // read. Both are the same repair — authorise again, over the database.
   "not_connected",
   "wrong_workspace",
   "unauthorised",
@@ -83,13 +90,22 @@ export type Writable = CheckedLedger & {
   batch: string;
   sourceRows: SourceRow[];
   workspaceId: string | null;
+  /** What an earlier pass left behind, and `null` before the first. */
+  writeBack: WriteBack | null;
 };
 
-/** One row of the batch, by the two identifiers the write-back needs. */
+/**
+ * One row of the batch, by the two identifiers the write-back needs. The
+ * **page id** is what every set here is keyed on, because it is Notion's own
+ * and cannot repeat; `sourceId` is what the reviewer reads, and is only ever
+ * mapped to at the end.
+ */
 interface HandedRow {
   sourceId: string;
   pageId: string;
 }
+
+const sourceIdOf = (row: HandedRow) => row.sourceId;
 
 /**
  * The rows whose **every** candidate reached the CRM.
@@ -97,22 +113,26 @@ interface HandedRow {
  * A source row becomes a Company, a Person and a Deal, and holding any one of
  * them keeps the row out of Attio — a person held under `B1` leaves their
  * company exported alone (ADR-0003), which is not the row landing. So the test
- * is all three, and the ids come from `candidateIdsOf` rather than from a
- * second derivation that could disagree with the transform's.
+ * is all three.
+ *
+ * Neither half of it is derived twice. The ids are `candidateIdsOf`'s, which
+ * the transform also keys on; *was this exported* is `emit`'s own `sent`, which
+ * is what actually decided the CSV rows. Two readings of either could drift,
+ * and drift here is `Imported` overstating.
  */
 export function handedOff(state: Writable): HandedRow[] {
-  const held = new Set(
-    [...state.companies, ...state.people, ...state.deals]
-      .filter((candidate) => candidate.held)
-      .map((candidate) => candidate.id),
+  const exported = new Set(
+    [...sent(state.companies), ...sent(state.people), ...sent(state.deals)].map(
+      (candidate) => candidate.id,
+    ),
   );
   return state.sourceRows
     .filter((row) => {
       const ids = candidateIdsOf(row);
       return (
-        !held.has(ids.companyId) &&
-        !held.has(ids.personId) &&
-        !held.has(ids.dealId)
+        exported.has(ids.companyId) &&
+        exported.has(ids.personId) &&
+        exported.has(ids.dealId)
       );
     })
     .map((row) => ({
@@ -133,16 +153,21 @@ const PACE_MS = 334;
 const ATTEMPTS = 3;
 
 /**
- * Notion's own documented ceiling. The wait is the header's, honoured as sent;
- * the cap only stops a stray header holding the reviewer's request open for an
- * hour, because they clicked Confirm and are watching.
+ * The wait is the header's, honoured as sent. The cap is short on purpose:
+ * ADR-0007 rejected following Notion's documented policy verbatim precisely
+ * because the reviewer has clicked Confirm and is watching, and ruled that
+ * **past a short budget the Retry button is the backoff**. A `Retry-After`
+ * longer than this is not waited out in the foreground; the row fails as
+ * `rate_limited` and the reviewer decides when to try again.
  */
-const RETRY_AFTER_CAP_MS = 30_000;
+const RETRY_AFTER_CAP_MS = 5_000;
 
-const retryAfterMs = (res: Response): number => {
+/** `null` is *longer than the foreground has*, and stops the row's retries. */
+const retryAfterMs = (res: Response): number | null => {
   const seconds = Number(res.headers.get("Retry-After"));
   if (!Number.isFinite(seconds)) return PACE_MS;
-  return Math.min(seconds * 1000, RETRY_AFTER_CAP_MS);
+  const wait = seconds * 1000;
+  return wait > RETRY_AFTER_CAP_MS ? null : wait;
 };
 
 /**
@@ -168,14 +193,31 @@ async function writeOne(
     if (attempt >= ATTEMPTS) {
       return rateLimited ? "rate_limited" : "notion_unavailable";
     }
-    await sleep(rateLimited ? retryAfterMs(res) : PACE_MS);
+    const wait = rateLimited ? retryAfterMs(res) : PACE_MS;
+    if (wait === null) return "rate_limited";
+    await sleep(wait);
   }
 }
 
-/** Nothing could be written, and the one reason is true of every row. */
-const allFailed = (rows: HandedRow[], cause: Cause): WriteBack => ({
-  written: [],
-  failed: rows.map((row) => ({ sourceId: row.sourceId, cause })),
+/**
+ * Nothing further can be written, and the one reason is true of every row that
+ * still needed writing.
+ *
+ * This is the **only** place the run's own record of an earlier pass is read,
+ * and it is read because Notion cannot be asked: there is either no token or a
+ * token for the wrong workspace. Without it a row written on the first pass
+ * would be reported as failed on the second, which would send the reviewer to
+ * Notion to repair rows that are already `Imported`.
+ */
+const allFailed = (
+  rows: HandedRow[],
+  cause: Cause,
+  written: ReadonlySet<string>,
+): WriteBack => ({
+  written: rows.filter((row) => written.has(row.sourceId)).map(sourceIdOf),
+  failed: rows
+    .filter((row) => !written.has(row.sourceId))
+    .map((row) => ({ sourceId: row.sourceId, cause })),
 });
 
 /**
@@ -189,54 +231,54 @@ const allFailed = (rows: HandedRow[], cause: Cause): WriteBack => ({
 export async function writeBackOf(state: Writable): Promise<WriteBack> {
   const rows = handedOff(state);
   if (rows.length === 0) return { written: [], failed: [] };
+  const before = new Set(state.writeBack?.written ?? []);
 
   const connection = readConnection();
-  if (!connection) return allFailed(rows, "not_connected");
+  if (!connection) return allFailed(rows, "not_connected", before);
   if (state.workspaceId && connection.workspace_id !== state.workspaceId) {
-    return allFailed(rows, "wrong_workspace");
+    return allFailed(rows, "wrong_workspace", before);
   }
 
   const { access_token: accessToken } = connection;
   let stillReady: SourceRow[];
   try {
     const dataSourceId = await findSharedDataSource(accessToken);
-    if (!dataSourceId) return allFailed(rows, "not_connected");
+    // A live grant that reaches no database we can read: the rows cannot be
+    // marked through it, and the repair is authorising again over the database
+    // — which is what `not_connected` asks for.
+    if (!dataSourceId) return allFailed(rows, "not_connected", before);
     stillReady = await queryBatchRows(accessToken, dataSourceId, state.batch);
   } catch (error) {
     // The read side throws `ApiError`, and here it is not one: a write-back
     // outcome is never an HTTP error, so the same two statuses become the same
     // two causes the writes themselves would have produced.
     const expired = error instanceof ApiError && error.code === "not_connected";
-    return allFailed(rows, expired ? "unauthorised" : "notion_refused");
+    return allFailed(rows, expired ? "unauthorised" : "notion_refused", before);
   }
 
   const ready = new Set(stillReady.map((row) => row[PAGE_ID]));
   // Anything no longer ready was already marked — by an earlier pass, by the
   // half of a write that survived a process death, or by a person in Notion.
+  // That is the re-query answering the question our own record cannot.
   const toWrite = rows.filter((row) => ready.has(row.pageId));
 
-  const failed: WriteBack["failed"] = [];
+  const failed: { row: HandedRow; cause: Cause }[] = [];
   for (const [index, row] of toWrite.entries()) {
     if (index > 0) await sleep(PACE_MS);
     const cause = await writeOne(accessToken, row.pageId);
     if (!cause) continue;
     if (BATCH_WIDE.has(cause)) {
       failed.push(
-        ...toWrite.slice(index).map((rest) => ({
-          sourceId: rest.sourceId,
-          cause,
-        })),
+        ...toWrite.slice(index).map((rest) => ({ row: rest, cause })),
       );
       break;
     }
-    failed.push({ sourceId: row.sourceId, cause });
+    failed.push({ row, cause });
   }
 
-  const unwritten = new Set(failed.map((one) => one.sourceId));
+  const unwritten = new Set(failed.map((one) => one.row.pageId));
   return {
-    written: rows
-      .filter((row) => !unwritten.has(row.sourceId))
-      .map((row) => row.sourceId),
-    failed,
+    written: rows.filter((row) => !unwritten.has(row.pageId)).map(sourceIdOf),
+    failed: failed.map(({ row, cause }) => ({ sourceId: row.sourceId, cause })),
   };
 }

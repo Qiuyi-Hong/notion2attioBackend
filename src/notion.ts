@@ -56,11 +56,8 @@ const notionRequest = (
     body: JSON.stringify(body),
   });
 
-const notionPost = (authorization: string, path: string, body: unknown) =>
-  notionRequest(authorization, path, body);
-
 export async function exchangeCode(code: string): Promise<Connection> {
-  const res = await notionPost(basicAuth(), "/v1/oauth/token", {
+  const res = await notionRequest(basicAuth(), "/v1/oauth/token", {
     grant_type: "authorization_code",
     code,
     redirect_uri: config.notion.redirectUri,
@@ -113,7 +110,7 @@ async function throwForStatus(res: Response, clause: string): Promise<void> {
 export async function findSharedDataSource(
   accessToken: string,
 ): Promise<string | undefined> {
-  const res = await notionPost(`Bearer ${accessToken}`, "/v1/search", {
+  const res = await notionRequest(`Bearer ${accessToken}`, "/v1/search", {
     filter: { property: "object", value: "data_source" },
     page_size: 1,
   });
@@ -189,7 +186,7 @@ async function* queryPages(
 ): AsyncGenerator<NotionPage> {
   let cursor: string | undefined;
   do {
-    const res = await notionPost(
+    const res = await notionRequest(
       `Bearer ${accessToken}`,
       `/v1/data_sources/${dataSourceId}/query`,
       { filter, page_size: 100, ...(cursor && { start_cursor: cursor }) },
@@ -309,7 +306,7 @@ export const markImported = (
  * it, which is the outcome asked for — so it is not an error here.
  */
 export async function revokeToken(accessToken: string): Promise<void> {
-  const res = await notionPost(basicAuth(), "/v1/oauth/revoke", {
+  const res = await notionRequest(basicAuth(), "/v1/oauth/revoke", {
     token: accessToken,
   });
   if (!res.ok && res.status !== 401) {

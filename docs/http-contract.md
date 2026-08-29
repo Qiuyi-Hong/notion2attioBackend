@@ -205,7 +205,7 @@ A failure's `cause` is a machine code from a closed list, like a flag's `refused
 
 | `cause` | What happened |
 | --- | --- |
-| `not_connected` | There was no live Connection when the node ran |
+| `not_connected` | No live Connection when the node ran, or a live one whose grant reaches no database we can read — the repair is the same authorisation |
 | `wrong_workspace` | The live Connection named another workspace ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)) |
 | `unauthorised` | Notion answered `401` — a revoked or re-issued grant |
 | `rate_limited` | `429`, past its retry budget |
@@ -352,7 +352,7 @@ One shape, one closed list of codes.
 
 `wrong_workspace` sits next to `not_connected` on purpose: both are **preconditions on the Connection**, not write-back outcomes, so neither breaches the rule below — the write-back never starts. `not_connected` wins when there is no Connection at all. It is returned by `POST /api/runs/:runId/confirm` only. `/review` is deliberately unguarded: nothing between `review` and `emit` touches Notion, and since the block clears the moment the original workspace is connected again, stopping the Reviewer mid-triage would save no work ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)).
 
-`notion_failed` is **read-side only** — the batch query and the data-source search. No write-back outcome is ever an HTTP error: a failed write, `401` included, is run state on `GET /api/runs/:runId`, for the same reason semantic validation failures re-interrupt rather than return `400`. The reviewer is looking at the ledger, not at the response to a POST they will never see again.
+`notion_failed` is **read-side only** — the batch query and the data-source search, as `GET /api/batches` and the read node make them. The write node makes those same two calls before it writes, and there they are part of the write-back: they produce a `cause` on `writeBack.failed`, never a `502`. No write-back outcome is ever an HTTP error: a failed write, `401` included, is run state on `GET /api/runs/:runId`, for the same reason semantic validation failures re-interrupt rather than return `400`. The reviewer is looking at the ledger, not at the response to a POST they will never see again.
 
 The list is closed for failures the contract *knows about*. A failure it does not — an unhandled throw — leaves in the same shape with code `internal_error` and a `500`. That code is deliberately outside the list: a browser that finds it has hit a bug, not a state.
 
