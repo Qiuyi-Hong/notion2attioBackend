@@ -32,10 +32,19 @@ Everything after stage 4 is scripted and repeatable:
 
 Re-running the seeder creates a **second** database — it is not idempotent by design. Delete the old one in Notion first.
 
-## Two API facts that shape the app
+## Three API facts that shape the app
 
 1. **`status` properties are creatable via the API.** With custom options *and* groups, on the current version (`2026-03-11`). This used not to be true, and a lot of surviving advice online says to build status properties by hand in the UI. It removes the only real argument for modelling `CRM status` as a `select`.
 2. **Rows live in a *data source*, not the database.** Since API version `2025-09-03` a database owns one or more data sources. Creating a row is `POST /v1/pages` with parent `{"type":"data_source_id","data_source_id":…}`, and querying is `POST /v1/data_sources/{id}/query`. **The app needs `NOTION_DATA_SOURCE_ID`, not just `NOTION_DATABASE_ID`** — a database id alone will not run the extraction filter. `POST /v1/databases` returns `data_sources[]` on the create response.
+3. **The schema belongs to the data source, so it goes in `initial_data_source`.** Passing `properties` at the top level of `POST /v1/databases` is **silently ignored** — no error, no warning. You get a database whose only property is a default `Name` title, and the failure surfaces one call later as `"Account is not a property that exists"` from `POST /v1/pages`. Correct shape:
+
+   ```jsonc
+   {
+     "parent": { "type": "page_id", "page_id": "…" },
+     "title":  [{ "text": { "content": "Qualified accounts" } }],
+     "initial_data_source": { "properties": { /* the 18 properties */ } }
+   }
+   ```
 
 ## The extraction filter
 

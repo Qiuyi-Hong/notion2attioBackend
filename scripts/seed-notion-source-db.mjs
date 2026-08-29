@@ -78,14 +78,13 @@ function parseCsv(text) {
 
 // ------------------------------------------------------------ notion client
 
-const token = process.env.NOTION_TOKEN;
-const parentPageId = process.env.NOTION_PARENT_PAGE_ID;
-
+// Read at call time, not module-load time: loadEnvFile() runs inside main(),
+// so anything captured up here would miss values that came from .env.
 async function notion(method, endpoint, body) {
   const res = await fetch(`https://api.notion.com/v1/${endpoint}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${process.env.NOTION_TOKEN}`,
       'Notion-Version': NOTION_VERSION,
       'Content-Type': 'application/json',
     },
@@ -217,10 +216,13 @@ async function main() {
     );
   }
 
+  // The schema belongs to the data source, not the database. Passing
+  // `properties` at the top level is silently ignored and you get a database
+  // with nothing but a default `Name` title.
   const db = await notion('POST', 'databases', {
     parent: { type: 'page_id', page_id: process.env.NOTION_PARENT_PAGE_ID },
     title: [{ text: { content: DB_TITLE } }],
-    properties: buildSchema(),
+    initial_data_source: { properties: buildSchema() },
   });
 
   // Since API version 2025-09-03 a database owns data sources, and rows are
