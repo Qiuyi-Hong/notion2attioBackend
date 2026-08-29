@@ -64,7 +64,7 @@ This costs one Notion query and earns three things: the pre-run screen, an hones
 | `GET /api/runs` | Recent runs — `{ runId, batch, createdAt, status }[]`. |
 | `GET /api/runs/:runId` | The snapshot. The one thing the browser polls. |
 | `POST /api/runs/:runId/review` | The reviewer's decision document. |
-| `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio. |
+| `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio — and, on a retry, the attestation that the write-back is being abandoned. |
 | `POST /api/runs/:runId/continue` | Restarts a `stalled` run from its last checkpoint. |
 | `GET /api/runs/:runId/files/:fileId` | The CSV bytes, from the checkpoint. |
 | `DELETE /api/runs/:runId` | Deletes the run. |
@@ -73,14 +73,15 @@ This costs one Notion query and earns three things: the pre-run screen, an hones
 
 ## Run states
 
-`status` is a closed list of six.
+`status` is a closed list of seven.
 
 | State | Meaning |
 | --- | --- |
 | `running` | Work is in flight in this process. |
 | `awaiting_review` | The first interrupt. The ledger is on screen. |
 | `awaiting_confirmation` | The files exist. Waiting for the human to confirm the Attio import. |
-| `done` | The write-back to Notion completed. |
+| `done` | The write-back to Notion completed. Every handed-off row reads `Imported`. |
+| `abandoned` | The reviewer gave up on a write-back that could not finish. Some handed-off rows still read `Ready for CRM`. |
 | `failed` | A node threw. |
 | `stalled` | The checkpoint has pending tasks but nothing is running — the process restarted mid-run. |
 
@@ -89,6 +90,10 @@ This costs one Notion query and earns three things: the pre-run screen, an hones
 We persist no failure record of our own, so **after a restart a `failed` run reads as `stalled`**. Continuing it re-runs the node that threw. This is a deliberate omission, not an oversight.
 
 The run reaches `awaiting_confirmation` **as soon as the files exist**, not when they are downloaded. A download is a repeatable `GET`.
+
+`abandoned` is terminal but is **not** `done`. The distinction is load-bearing against [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13)'s one-live-run-per-batch guard ([PR #39](https://github.com/Qiuyi-Hong/notion2attioBackend/pull/39)), under which only a `done` run releases its batch: an abandoned run leaves rows reading `Ready for CRM` whose deals are **already in Attio**, so releasing the batch would let the next run emit those deals a second time. The batch stays reserved until a person sets those rows to `Imported` in Notion by hand and deletes the run — `DELETE /api/runs/:runId` is the explicit release. See [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md).
+
+Two exits from `awaiting_confirmation` assert opposite things and must not be conflated: **cancelling** (#13's meaning — *these files did not reach Attio*) and **abandoning** (*they did, and I am giving up on marking Notion*).
 
 ## Payloads
 
@@ -100,9 +105,12 @@ The run reaches `awaiting_confirmation` **as soon as the files exist**, not when
   candidates: [...],      // grouped by Company / Person / Deal, per #10
   batchFlags: [...],
   repairs:    [...],      // the repair log, shown in place
-  files:      [{ fileId, filename, bytes }] | null
+  files:      [{ fileId, filename, bytes }] | null,
+  writeBack:  { written: sourceId[], failed: [{ sourceId, cause }] } | null
 }
 ```
+
+`writeBack` is `null` until a write-back has been attempted. A non-empty `failed` is what turns the confirmation panel into a retry panel — and it is why [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) needed **no** extra state for the retry pause: a run with failures is paused at the confirmation interrupt, which is the definition of `awaiting_confirmation`. The difference the UI needs is derived from this field, not stored beside it.
 
 `files` is `null` until the emit node has run. `fileId` is opaque, so [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) can change the file set without touching this contract.
 
@@ -122,7 +130,21 @@ This is also why the payload is not a patch of *rows*: [#6](https://github.com/Q
 
 ### The attestation — `POST /api/runs/:runId/confirm`
 
-The human's statement that they performed the Attio import. The failure and double-submit semantics of the node behind it are [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17).
+```
+{ confirmed: true } | { abandoned: true }
+```
+
+`{ confirmed: true }` is the human's statement that they performed the Attio import. It is accepted on the first pass and on every retry pass.
+
+`{ abandoned: true }` is accepted **only** when `writeBack.failed` is non-empty — there is nothing to abandon before a write-back has failed. It ends the run `abandoned`.
+
+**One route serves both passes**, because the stage guard below already does the work: after a partial failure the run is genuinely back at the confirmation pause, so a retry is accepted for exactly the reason a first confirm is. The Retry button is this route with this payload.
+
+**The write node re-queries Notion before writing** — `Batch = <batch> AND CRM status = Ready for CRM`, intersected with the rows this run handed off — and writes only what is still `Ready for CRM`. That makes the node idempotent against Notion rather than against a record of ours, which is what lets it survive a double-submit, a retry, and a process death mid-write alike. Writes are sequential (~3/s, [#4](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/4)); a `429` is retried honouring `Retry-After` and a `5xx` twice, after which the node stops and routes back to the pause with `writeBack.failed` populated.
+
+A `401` stops the node immediately rather than failing the remaining rows one at a time, and reports one cause for the batch. The run also records the `workspace_id` it read the batch from, and the write node refuses if the current Connection names a different workspace — a reconnect between demo takes must not write `Imported` into a workspace that never produced the batch.
+
+Full reasoning: [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.md).
 
 ### File download — `GET /api/runs/:runId/files/:fileId`
 
@@ -149,7 +171,9 @@ Two mechanisms cover it together:
 1. **An in-process lock per run.** The first request takes it.
 2. **The stage guard.** `/review` and `/confirm` each return `409` if the run is not at that pause. Once the first request has moved the run past the pause, the second is refused by definition.
 
-No client cooperation is required — no checkpoint token to echo back. Multi-process safety is a deliberate gap; see below.
+3. **The write node's re-query.** Even if both mechanisms were bypassed, a second write-back finds every row already `Imported` and writes nothing.
+
+No client cooperation is required — no checkpoint token to echo back. Multi-process safety is a deliberate gap; see below — and (3) is the one guard that would still hold across two processes.
 
 ## Errors
 
@@ -167,6 +191,8 @@ One shape, one closed list of codes.
 | `invalid_payload` | `400` |
 | `notion_failed` | `502` |
 
+`notion_failed` is **read-side only** — the batch query and the data-source search. No write-back outcome is ever an HTTP error: a failed write, `401` included, is run state on `GET /api/runs/:runId`, for the same reason semantic validation failures re-interrupt rather than return `400`. The reviewer is looking at the ledger, not at the response to a POST they will never see again.
+
 `problem+json` (RFC 9457) was considered and declined: nothing here consumes it.
 
 ## Repo split
@@ -180,7 +206,6 @@ The graph lives entirely in `notion2attioBackend`. `notion2attioFrontend` is a p
 | Question | Ticket |
 | --- | --- |
 | What files exist and what is in them | [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) |
-| What the write-back does when it half-fails | [#17](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17) |
 | The `CRM status` of a half-handed-off row | [#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29) |
 | What is re-derived when a reviewer edits a derived-from value | [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31) |
 
@@ -192,3 +217,4 @@ These join the four [#15](https://github.com/Qiuyi-Hong/notion2attioBackend/issu
 - **Run URLs are unguessable, not authorised.** A v4 UUID in a shareable link is the whole access-control story. There is no authentication in front of it.
 - **`failed` does not survive a restart.** It degrades to `stalled`, and continuing re-runs the node that threw.
 - **Nothing sweeps old runs.** `DELETE` is the only deletion; the SQLite file grows.
+- **A confirmation is taken at face value.** Nothing detects a reviewer who clicks Confirm before the Attio import actually finished; the recovery is the same manual edit in Notion. This is the residue of choosing a human attestation over a signal we cannot obtain ([#7](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/7)), not an oversight.
