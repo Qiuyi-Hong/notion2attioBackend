@@ -1,0 +1,8 @@
+Person name,Email addresses,Job title,LinkedIn,Lead source,Source ID,Company name,Company domain,Company segment,Company primary location
+Priya Nair,priya.nair@northbeam.example.com,VP Revenue Operations,https://linkedin.example.com/in/priya-nair-demo,Inbound demo,QL-260818-001,Northbeam Analytics,northbeam.example.com,Mid-market,London
+Helena Costa,helena.costa@oriel.example.com,Commercial Director,https://linkedin.example.com/in/helena-costa-demo,Partner referral,QL-260818-002,Oriel Foods,oriel.example.com,Mid-market,Manchester
+Lewis Grant,lewis.grant@brightyard.example.com,Sales Operations Lead,https://linkedin.example.com/in/lewis-grant-demo,Outbound research,QL-260819-004,Brightyard,brightyard.example.com,SMB,Bristol
+Marta Silva,marta.silva@brightyard.example.com,Head of Demand Generation,https://linkedin.example.com/in/marta-silva-demo,Agency partner list,QL-260819-005,Brightyard,brightyard.example.com,SMB,Bristol
+Emily Stone,emily@heliograph.example.com,Revenue Systems Manager,https://linkedin.example.com/in/emily-stone-demo,Webinar,QL-260820-006,Heliograph Systems,heliograph.example.com,Mid-market,Edinburgh
+Soren Dahl,soren@alderfinch.example.com,Founder,https://linkedin.example.com/in/soren-dahl-demo,Founder referral,QL-260820-007,Alder & Finch,alderfinch.example.com,SMB,London
+Noor Hassan,noor@lattice.example.com,Revenue Operations Manager,https://linkedin.example.com/in/noor-hassan-demo,Outbound research,QL-260820-008,Lattice Forge,lattice.example.com,Mid-market,Cambridge
