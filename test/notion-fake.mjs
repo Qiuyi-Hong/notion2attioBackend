@@ -15,6 +15,9 @@ import assert from "node:assert/strict";
  * - `script` — `{ [path]: (body) => [status, json] }`, replaced per test
  * - `restore()` — puts the real `fetch` back
  *
+ * A reply may be `async`, which is how a test holds a call open while it
+ * asserts what the app did before Notion answered.
+ *
  * An unscripted path fails the test rather than answering: a call the test did
  * not expect is a change in what the app asks Notion for.
  */
@@ -44,7 +47,7 @@ export function fakeNotion() {
       reply,
       `the app called ${url.pathname}, which this test did not script`,
     );
-    const [status, json] = reply(body);
+    const [status, json] = await reply(body);
     return new Response(JSON.stringify(json), {
       status,
       headers: { "Content-Type": "application/json" },

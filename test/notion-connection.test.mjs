@@ -90,7 +90,7 @@ beforeEach(() => {
   scriptHappyPath();
   const db = new DatabaseSync(DB_PATH);
   db.exec(
-    "DELETE FROM connection; DELETE FROM pending_authorisation; DROP TABLE IF EXISTS runs;",
+    "DELETE FROM connection; DELETE FROM pending_authorisation; DELETE FROM runs;",
   );
   db.close();
 });
@@ -333,24 +333,22 @@ test("deleting the connection revokes the grant and reports nothing stranded", a
   assert.equal(storedConnection(), undefined);
 });
 
-test("deleting the connection names the runs a disconnect would strand", async () => {
+test("a run that is not awaiting confirmation strands nothing", async () => {
   const state = await startAuthorisation();
   await get(`/auth/notion/callback?code=the-code&state=${state}`);
+  // A real row, in the shape #51 gave the table: identifier, batch, created
+  // time and nothing else. Its status is read from the checkpoint, so a run
+  // cannot be *told* it is stranded — and none can be until the confirmation
+  // pause arrives with #57.
   const db = new DatabaseSync(DB_PATH);
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL)",
-  );
-  db.exec(
-    "INSERT INTO runs (run_id, status) VALUES ('run-a', 'awaiting_confirmation'), ('run-b', 'done')",
-  );
+  db.prepare(
+    "INSERT INTO runs (run_id, batch, created_at) VALUES (?, ?, ?)",
+  ).run("run-a", "2026-W34", new Date().toISOString());
   db.close();
 
   const res = await fetch(`${base}/api/connection`, { method: "DELETE" });
 
-  assert.deepEqual(await res.json(), {
-    disconnected: true,
-    strandedRuns: ["run-a"],
-  });
+  assert.deepEqual(await res.json(), { disconnected: true, strandedRuns: [] });
 });
 
 test("deleting a connection that is not there answers not_connected", async () => {

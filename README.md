@@ -331,8 +331,10 @@ number here disagrees with that output, the output is right.
 The argument above stands on the workbook, the batch, the decision record and the
 committed worked example. All four are in this repo now.
 
-`src/` is still an Express scaffold: the graph — **transform → check → review → emit**,
-with two interrupts and a write-back node — is specified in
-[`docs/http-contract.md`](docs/http-contract.md) and not yet built. The frontend lives in
-a separate repository and holds no pipeline logic. Where a running demo exists, it is
-supporting evidence for this write-up rather than the other way round.
+The graph is compiled and run inside the Express process, and reaches its first
+interrupt: a run reads its batch from the connected Notion workspace and pauses for
+the Reviewer. The nodes between — **transform → check → emit**, the second interrupt
+and the write-back — are specified in [`docs/http-contract.md`](docs/http-contract.md)
+and not yet built. The frontend lives in a separate repository and holds no pipeline
+logic. Where a running demo exists, it is supporting evidence for this write-up rather
+than the other way round.
