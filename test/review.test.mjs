@@ -209,6 +209,26 @@ const sendableDeals = (ledger) =>
 
 const batchFlag = (ledger) => ledger.batchFlags[0];
 
+/**
+ * Every Warn in the ledger, answered. Since #56 this is what it takes to
+ * *leave* the pause: the batch refuses to export while any Warn is
+ * unanswered, so a decision that answers none of them lands and leaves the run
+ * exactly where it was. The two tests about the stage guard need a decision
+ * that moves the run, and this is the smallest one that does.
+ */
+const everyWarnAnswered = (ledger) =>
+  Object.fromEntries(
+    [
+      ...ledger.candidates.companies,
+      ...ledger.candidates.people,
+      ...ledger.candidates.deals,
+    ]
+      .flatMap((candidate) => candidate.flags)
+      .concat(ledger.batchFlags)
+      .filter((flag) => flag.level === "warn")
+      .map((flag) => [flag.id, true]),
+  );
+
 // ── One route, three acts ──────────────────────────────────────────────────
 
 test("answers, holds and sparse edits all take effect through one route", async () => {
@@ -482,7 +502,7 @@ test("a Stop with no control of its own takes no answer", async () => {
 
 test("a review posted when the run is not at that pause is refused", async () => {
   const run = await paused();
-  await reviewed(run.runId, {});
+  await reviewed(run.runId, { answers: everyWarnAnswered(run) });
 
   const res = await review(run.runId, {});
 
@@ -493,7 +513,10 @@ test("a review posted when the run is not at that pause is refused", async () =>
 test("a double-submitted review applies once", async () => {
   const run = await paused();
   const { company } = shared(run);
-  const decision = { edits: { [company.id]: { name: "Brightyard Group" } } };
+  const decision = {
+    edits: { [company.id]: { name: "Brightyard Group" } },
+    answers: everyWarnAnswered(run),
+  };
 
   const [first, second] = await Promise.all([
     review(run.runId, decision),
