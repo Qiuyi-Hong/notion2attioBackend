@@ -58,9 +58,14 @@ export const DealCandidate = z.object({
 export type DealCandidate = z.infer<typeof DealCandidate>;
 
 /**
- * One silent repair, against the candidate and field the value sits on, so the
- * ledger can mark it in place rather than in an audit screen elsewhere. The
- * original is kept because *silent* means unremarkable, not hidden.
+ * One silent repair, against the **candidate field** the repaired value sits on
+ * — not the source property it came from — so the ledger marks it in place
+ * rather than in an audit screen elsewhere. The original is kept because
+ * *silent* means unremarkable, not hidden.
+ *
+ * One entry per source row repaired, so a candidate that several rows collapsed
+ * onto carries one for each. That is not double-counting: it is what makes the
+ * collapse legible, since the two originals are exactly what differed.
  */
 export const Repair = z.object({
   sourceId: z.string(),
@@ -74,12 +79,13 @@ export type Repair = z.infer<typeof Repair>;
 /**
  * S1, the batch's one repair: a website becomes the bare domain Attio matches
  * companies on — lowercased, with the scheme, a leading `www.` and anything
- * from the first `/`, `?` or `#` removed.
+ * from the first `/`, `?` or `#` removed. This is the **normalised domain** a
+ * Company candidate is keyed on (ADR-0001).
  *
  * Deterministic and reformatting only. It asserts nothing the source row did
  * not already say, which is exactly what makes it silent rather than a flag.
  */
-export const bareDomain = (website: string): string =>
+export const normalisedDomain = (website: string): string =>
   website
     .trim()
     .toLowerCase()
@@ -90,6 +96,12 @@ export const bareDomain = (website: string): string =>
 /** Notion answers an empty property with `null`; a candidate field is text. */
 const text = (row: SourceRow, property: string): string => row[property] ?? "";
 
+/**
+ * What the candidate ledger renders (#10): every candidate on screen, with the
+ * repair log shown in place against the values it changed. The wire splits the
+ * two — `candidates` grouped by object, `repairs` beside it — because Attio
+ * imports one file per object.
+ */
 export interface Ledger {
   companies: CompanyCandidate[];
   people: PersonCandidate[];
@@ -113,7 +125,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
   for (const row of sourceRows) {
     const sourceId = text(row, "Source ID");
     const website = text(row, "Website");
-    const domain = bareDomain(website);
+    const domain = normalisedDomain(website);
     const key = domain || sourceId;
     const companyId = `company:${key}`;
 
@@ -121,7 +133,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
       repairs.push({
         sourceId,
         candidateId: companyId,
-        field: "Website",
+        field: "domain",
         from: website,
         to: domain,
       });
@@ -141,7 +153,11 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
     }
 
     const email = text(row, "Work email");
-    const personId = `person:${email || sourceId}`;
+    // The key is normalised so that two spellings of one address cannot become
+    // two People that Attio would upsert onto one record — the same failure the
+    // domain repair prevents. The *value* is left exactly as Notion gave it, so
+    // this asserts nothing and is not a repair to log.
+    const personId = `person:${email.trim().toLowerCase() || sourceId}`;
     if (!people.has(personId)) {
       people.set(personId, {
         id: personId,

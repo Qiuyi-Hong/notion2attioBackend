@@ -16,7 +16,7 @@ import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { parseCsv, CSV_PATH, TARGET_BATCH, TARGET_STATUS } from './seed-notion-source-db.mjs';
-import { bareDomain } from '../src/candidates.ts';
+import { normalisedDomain } from '../src/candidates.ts';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORKBOOK_PATH = path.join(ROOT, 'data', 'crm-handoff-working.xlsx');
@@ -152,9 +152,17 @@ const sheetDomain = (website) =>
 //   =IF(B2="","",IF(F2="","CHECK","READY"))   — F is the work email.
 const sheetRowCheck = (row) => (row['Work email'] === '' ? 'CHECK' : 'READY');
 
-// S1 is the pipeline's own, imported rather than restated, so the checks below
-// guard the repair that ships instead of a second copy of it.
-const s1Domain = bareDomain;
+// S1, the pipeline's silent repair: lowercase; strip scheme, `www.`, path,
+// trailing `/`. Restated here rather than imported, on purpose — this script is
+// the independent re-derivation of every count the README quotes, and a script
+// that called the shipped function would confirm the pipeline against itself.
+// The last check below is what keeps the two copies honest.
+const s1Domain = (website) =>
+  website
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[/?#].*$/, '');
 
 // ------------------------------------------------------------ the batch
 
@@ -335,6 +343,14 @@ assert(
 );
 assert('7 of 8 source rows are marked Imported', markedImported.length === 7, `got ${markedImported.length}`);
 assert('5 distinct `Employees` values for 3 ranges', employees.size === 5 && ranges.size === 3, `${employees.size} / ${ranges.size}`);
+
+// The counts above are this script's own. This one check is where the shipped
+// repair meets them: it may not disagree with S1 on any website in the batch.
+assert(
+  'the pipeline repairs every website exactly as S1 does',
+  derived.every((d) => normalisedDomain(d.website) === d.s1),
+  derived.filter((d) => normalisedDomain(d.website) !== d.s1).map((d) => d.id).join(', '),
+);
 
 console.log(failures ? `\n${failures} check(s) FAILED\n` : `\nall checks passed\n`);
 process.exit(failures ? 1 : 0);

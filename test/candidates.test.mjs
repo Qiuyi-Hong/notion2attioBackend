@@ -58,7 +58,7 @@ const rows = parseCsv(readFileSync(CSV_PATH, "utf8")).filter(
 const accounts = new Set(rows.map((row) => row.Account));
 
 /** A website needing no repair: no scheme, no `www.`, no path, already lower. */
-const alreadyBare = (website) => /^(?!www\.)[a-z0-9.-]+$/.test(website);
+const alreadyNormalised = (website) => /^(?!www\.)[a-z0-9.-]+$/.test(website);
 
 const rowsFor = (account) => rows.filter((row) => row.Account === account);
 
@@ -158,6 +158,13 @@ test("the run proposes one company per account, one person per row, one deal per
   assert.equal(candidates.companies.length, accounts.size);
   assert.equal(candidates.people.length, rows.length);
   assert.equal(candidates.deals.length, candidates.companies.length);
+
+  // A candidate is its key, so a repeated id would mean two candidates the
+  // ledger cannot tell apart and Attio would upsert onto one record.
+  for (const group of Object.values(candidates)) {
+    const ids = group.map((candidate) => candidate.id);
+    assert.equal(new Set(ids).size, ids.length, "every candidate is distinct");
+  }
 });
 
 test("both Brightyard rows make one company carrying two people and one deal", async () => {
@@ -199,7 +206,7 @@ test("a path and a `www.` both normalise to a bare domain", async () => {
       (candidate) => candidate.id === person.companyId,
     );
     assert.ok(
-      alreadyBare(company.domain),
+      alreadyNormalised(company.domain),
       `${row.Website} became ${company.domain}`,
     );
   }
@@ -230,8 +237,8 @@ test("a person references its company rather than copying it", async () => {
 // ── The repair log ─────────────────────────────────────────────────────────
 
 test("the repair log carries every website that needed repairing, and no other", async () => {
-  const repaired = rows.filter((row) => !alreadyBare(row.Website));
-  const correct = rows.filter((row) => alreadyBare(row.Website));
+  const repaired = rows.filter((row) => !alreadyNormalised(row.Website));
+  const correct = rows.filter((row) => alreadyNormalised(row.Website));
   assert.ok(correct.length > 0, "the batch has an already-correct website");
   const { repairs, candidates } = await reviewSnapshot();
 
@@ -241,7 +248,9 @@ test("the repair log carries every website that needed repairing, and no other",
       (repair) => repair.sourceId === row["Source ID"],
     );
     assert.ok(entry, `${row["Source ID"]} was repaired`);
-    assert.equal(entry.field, "Website");
+    // The candidate field the value sits on, not the source property it came
+    // from — the ledger has to be able to find it.
+    assert.equal(entry.field, "domain");
     assert.equal(entry.from, row.Website, "the original value is kept");
     const company = candidates.companies.find(
       (candidate) => candidate.id === entry.candidateId,
@@ -260,7 +269,11 @@ test("the repair log carries every website that needed repairing, and no other",
 // ── Where the candidates live ──────────────────────────────────────────────
 
 test("no candidate data is persisted outside the checkpoint", async () => {
-  await reviewSnapshot();
+  const { candidates } = await reviewSnapshot();
+  assert.ok(
+    candidates.companies.length > 0,
+    "there are candidates to misplace",
+  );
 
   const db = new DatabaseSync(DB_PATH);
   const ours = db
@@ -270,6 +283,14 @@ test("no candidate data is persisted outside the checkpoint", async () => {
     .filter(
       (name) => !name.startsWith("checkpoint") && !name.startsWith("writes"),
     );
+  // No new table took any of it — and no new *column* did either, which is the
+  // half a list of table names alone would miss (ADR-0009).
+  const columns = ours.flatMap((table) =>
+    db
+      .prepare(`SELECT name FROM pragma_table_info('${table}')`)
+      .all()
+      .map((column) => `${table}.${column.name}`),
+  );
   db.close();
 
   assert.deepEqual(ours.sort(), [
@@ -277,4 +298,8 @@ test("no candidate data is persisted outside the checkpoint", async () => {
     "pending_authorisation",
     "runs",
   ]);
+  assert.deepEqual(
+    columns.filter((name) => name.startsWith("runs.")),
+    ["runs.run_id", "runs.batch", "runs.created_at"],
+  );
 });

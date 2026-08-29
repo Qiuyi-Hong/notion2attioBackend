@@ -165,7 +165,9 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
 
 `candidates` is grouped by the Attio object each candidate becomes, because the ledger is read that way and Attio imports one file per object. A Person carries a reference to its Company rather than a copy of it, and a Deal carries no name — reach-through and derived values resolve when the files are written ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
 
-Each entry in `repairs` names the candidate and field the repaired value sits on, alongside the original, so the ledger marks it in place rather than in an audit screen elsewhere. A value that was already correct produces no entry.
+Each entry in `repairs` names the **candidate field** the repaired value sits on — `domain`, not the source property `Website` it came from — alongside the original and the source row it arrived on, so the ledger marks it in place rather than in an audit screen elsewhere. A value that was already correct produces no entry.
+
+There is one entry per source row repaired, so a candidate several rows collapsed onto carries one for each: Brightyard's `domain` has two, because two spellings were repaired into it. That is what makes the collapse legible, and it is why the W34 log is seven entries rather than six.
 
 `blocked` is `null` unless something stops the run being confirmed that is not a stage or a missing Connection. Today it has exactly one reason: the live Connection names a different Notion workspace from the one this run read the batch from ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)). `readWorkspace` and `liveWorkspace` are **names, for display** — the comparison happens on `workspace_id`, server-side, and the ids never reach the browser. The server decides and the browser renders; putting the rule in both places would let the two disagree, and the route holds the copy that enforces.
 

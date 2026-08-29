@@ -54,9 +54,16 @@ const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
  * the run was created and never got anywhere, so it is `stalled` too.
  */
 export async function statusOf(runId: string): Promise<RunStatus> {
+  return statusFrom(runId, await graph.getState(configFor(runId)));
+}
+
+/** The same reading, for a caller that has already read the checkpoint. */
+function statusFrom(
+  runId: string,
+  snapshot: Awaited<ReturnType<typeof graph.getState>>,
+): RunStatus {
   if (working.has(runId)) return "running";
   if (threw.has(runId)) return "failed";
-  const snapshot = await graph.getState(configFor(runId));
   if (snapshot.tasks.some((task) => task.interrupts.length > 0)) {
     // `review` is the only node that interrupts so far. The confirmation
     // pause joins it with #57, and is told apart by the task's name.
@@ -71,14 +78,17 @@ export async function statusOf(runId: string): Promise<RunStatus> {
  *
  * The candidates and the repair log are read from the checkpoint, which is the
  * only place they exist (ADR-0009), and are empty until `transform` has run.
+ * One read serves the status and the ledger, so the two cannot come from two
+ * different moments of a live thread.
  */
 export async function snapshotOf(run: RunRecord) {
-  const { values } = await graph.getState(configFor(run.runId));
+  const state = await graph.getState(configFor(run.runId));
+  const { values } = state;
   return {
     runId: run.runId,
     batch: run.batch,
     createdAt: run.createdAt,
-    status: await statusOf(run.runId),
+    status: statusFrom(run.runId, state),
     candidates: {
       companies: values.companies ?? [],
       people: values.people ?? [],
