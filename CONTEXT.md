@@ -14,6 +14,8 @@ The permission a person grants that lets the pipeline read a Notion workspace an
 
 There is one connection at a time. Without it there is no batch to read: the connection, not the batch, is what the pipeline needs before it can start.
 
+A run remembers which workspace its connection named when it read the batch, because a connection can be withdrawn and replaced while that run is still paused — and the replacement may name a different workspace. Withdrawing a connection and granting it again over the *same* workspace is the ordinary way to recover from one that has expired, and stays ordinary.
+
 ## Run
 
 One pass of the pipeline over one batch — read the batch, propose candidates, pause for the Reviewer, make the files, pause again, and write the outcome back to Notion.
@@ -44,6 +46,8 @@ The Reviewer's statement that the handoff bundle reached the CRM.
 
 It is an attestation, not an observation. The pipeline never reads the CRM, so a person saying so is the only signal it can have. A confirmation covers exactly the candidates the bundle held, and may be given long after the bundle was made, by someone at a different machine.
 
+A confirmation is a statement about particular source rows in a particular workspace, so it can be given only through a connection naming the workspace the run read. A connection naming a different workspace cannot confirm that run — not because the write would go astray, but because the statement would be about rows that connection has never held.
+
 ## Write-back
 
 The only change this pipeline makes outside itself: after a confirmation, it records in Notion that a source row's accounts are now in the CRM.
@@ -53,6 +57,8 @@ A row is marked only when **every** candidate it feeds has reached the CRM. Part
 The write-back either completes or is **abandoned**; it has no half-done resting state. A row left unmarked is indistinguishable from a row that was never handed off, and the pipeline's own recovery path would then hand it off a second time — creating in the CRM a second opportunity that nobody asserted.
 
 **Abandoning the write-back** is the Reviewer's statement that the bundle *did* reach the CRM but that the record of it in Notion is being given up on. It is the opposite of ending a run without confirming, which says the bundle never reached the CRM at all. An abandoned run keeps its batch reserved: nothing may attempt that batch again until a person records the outcome in Notion by hand.
+
+A write-back that can never begin is abandoned in the same way as one that began and failed. That is the case when the workspace a run read is gone for good, leaving a run whose bundle reached the CRM and whose rows can never be marked.
 
 The mark is never taken back. The pipeline may assert that a row was handed off; it has no standing to retract a person's word that the handoff landed.
 
