@@ -2,7 +2,7 @@
 
 Settled on [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This is the wire format between `notion2attioFrontend` (React/Vite) and `notion2attioBackend` (Express + an embedded LangGraph graph).
 
-It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)) are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
+It is a specification first, and it stays authoritative where the code disagrees. The Connection ([#49](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/49)), batches ([#50](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/50)) and the starting, listing, watching, continuing and cancelling of runs ([#51](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/51)), and the candidates and repair log the snapshot carries ([#52](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/52)), are built. The two pauses and the file download are not: `/review`, `/confirm` and `/files/:fileId` arrive with the tickets that give them something to carry.
 
 ## What was already fixed before this ticket
 
@@ -154,7 +154,7 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
 ```
 {
   runId, batch, status, createdAt,
-  candidates: [...],      // grouped by Company / Person / Deal, per #10
+  candidates: { companies: [...], people: [...], deals: [...] },  // per #10
   batchFlags: [...],
   repairs:    [...],      // the repair log, shown in place
   files:      [{ fileId, filename, bytes }] | null,
@@ -162,6 +162,10 @@ Two exits from `awaiting_confirmation` assert opposite things and must not be co
   blocked:    { reason: "wrong_workspace", readWorkspace, liveWorkspace } | null
 }
 ```
+
+`candidates` is grouped by the Attio object each candidate becomes, because the ledger is read that way and Attio imports one file per object. A Person carries a reference to its Company rather than a copy of it, and a Deal carries no name — reach-through and derived values resolve when the files are written ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
+
+Each entry in `repairs` names the candidate and field the repaired value sits on, alongside the original, so the ledger marks it in place rather than in an audit screen elsewhere. A value that was already correct produces no entry.
 
 `blocked` is `null` unless something stops the run being confirmed that is not a stage or a missing Connection. Today it has exactly one reason: the live Connection names a different Notion workspace from the one this run read the batch from ([ADR-0008](./adr/0008-a-run-is-confirmed-only-through-the-connection-that-read-it.md)). `readWorkspace` and `liveWorkspace` are **names, for display** — the comparison happens on `workspace_id`, server-side, and the ids never reach the browser. The server decides and the browser renders; putting the rule in both places would let the two disagree, and the route holds the copy that enforces.
 

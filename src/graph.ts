@@ -3,9 +3,9 @@
  * No LangGraph Platform, no `@langchain/langgraph-sdk`: the run identifier is
  * the `thread_id` and the checkpoint file is the whole read model.
  *
- * Two nodes so far — read the batch, then pause for the Reviewer. The nodes
- * between them arrive with the tickets that need them (#52 onwards), and the
- * ledger is empty until they do.
+ * Three nodes so far — read the batch, propose candidates from it, then pause
+ * for the Reviewer. `check` arrives with #53, and the flags are empty until it
+ * does.
  *
  * `docs/research/langgraph-hitl.md` is where the API facts below were verified.
  */
@@ -22,6 +22,13 @@ import {
 } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import * as z from "zod";
+import {
+  candidatesFrom,
+  CompanyCandidate,
+  DealCandidate,
+  PersonCandidate,
+  Repair,
+} from "./candidates.ts";
 import config from "./config/config.ts";
 import { findSharedDataSource, queryBatchRows } from "./notion.ts";
 import { readConnection } from "./store.ts";
@@ -50,6 +57,11 @@ export const State = new StateSchema({
     .string()
     .nullable()
     .default(() => null),
+  /** The ledger, grouped by the Attio object each candidate becomes. */
+  companies: z.array(CompanyCandidate).default(() => []),
+  people: z.array(PersonCandidate).default(() => []),
+  deals: z.array(DealCandidate).default(() => []),
+  repairs: z.array(Repair).default(() => []),
 });
 
 const read: GraphNode<typeof State> = async (state) => {
@@ -69,6 +81,10 @@ const read: GraphNode<typeof State> = async (state) => {
     workspaceName: connection.workspace_name,
   };
 };
+
+/** Pure, and the whole of it lives in `candidates.ts`. */
+const transform: GraphNode<typeof State> = (state) =>
+  candidatesFrom(state.sourceRows);
 
 /**
  * The first pause. An interrupted node re-runs from the top on resume, so this
@@ -91,8 +107,10 @@ export const checkpointer = SqliteSaver.fromConnString(config.databasePath);
 
 export const graph = new StateGraph(State)
   .addNode("read", read)
+  .addNode("transform", transform)
   .addNode("review", review)
   .addEdge(START, "read")
-  .addEdge("read", "review")
+  .addEdge("read", "transform")
+  .addEdge("transform", "review")
   .addEdge("review", END)
   .compile({ checkpointer });

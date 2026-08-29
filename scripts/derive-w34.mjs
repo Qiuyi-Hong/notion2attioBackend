@@ -16,6 +16,7 @@ import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { parseCsv, CSV_PATH, TARGET_BATCH, TARGET_STATUS } from './seed-notion-source-db.mjs';
+import { bareDomain } from '../src/candidates.ts';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORKBOOK_PATH = path.join(ROOT, 'data', 'crm-handoff-working.xlsx');
@@ -151,14 +152,9 @@ const sheetDomain = (website) =>
 //   =IF(B2="","",IF(F2="","CHECK","READY"))   — F is the work email.
 const sheetRowCheck = (row) => (row['Work email'] === '' ? 'CHECK' : 'READY');
 
-// S1, the pipeline's silent repair: lowercase; strip scheme, `www.`, path,
-// trailing `/`.
-const s1Domain = (website) =>
-  website
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/[/?#].*$/, '');
+// S1 is the pipeline's own, imported rather than restated, so the checks below
+// guard the repair that ships instead of a second copy of it.
+const s1Domain = bareDomain;
 
 // ------------------------------------------------------------ the batch
 

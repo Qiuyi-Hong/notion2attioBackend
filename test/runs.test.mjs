@@ -289,7 +289,13 @@ test("the snapshot names the run, and holds nothing that has no meaning yet", as
   assert.equal(body.files, null);
   assert.equal(body.writeBack, null);
   assert.equal(body.blocked, null);
-  assert.deepEqual(body.candidates, [], "the ledger is empty until #52");
+  assert.deepEqual(body.batchFlags, [], "the flags are empty until #53");
+  // The ledger itself is `candidates.test.mjs`'s.
+  assert.deepEqual(Object.keys(body.candidates), [
+    "companies",
+    "people",
+    "deals",
+  ]);
 });
 
 test("GET never advances a run", async () => {

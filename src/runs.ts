@@ -66,18 +66,28 @@ export async function statusOf(runId: string): Promise<RunStatus> {
   return "done";
 }
 
-/** The snapshot `GET /api/runs/:runId` answers with. */
+/**
+ * The snapshot `GET /api/runs/:runId` answers with.
+ *
+ * The candidates and the repair log are read from the checkpoint, which is the
+ * only place they exist (ADR-0009), and are empty until `transform` has run.
+ */
 export async function snapshotOf(run: RunRecord) {
+  const { values } = await graph.getState(configFor(run.runId));
   return {
     runId: run.runId,
     batch: run.batch,
     createdAt: run.createdAt,
     status: await statusOf(run.runId),
-    // The ledger is empty until #52 fills it, and the three below stay null
-    // until they mean something.
-    candidates: [],
+    candidates: {
+      companies: values.companies ?? [],
+      people: values.people ?? [],
+      deals: values.deals ?? [],
+    },
+    // The flags arrive with #53, and the three below stay null until they mean
+    // something.
     batchFlags: [],
-    repairs: [],
+    repairs: values.repairs ?? [],
     files: null,
     writeBack: null,
     blocked: null,
