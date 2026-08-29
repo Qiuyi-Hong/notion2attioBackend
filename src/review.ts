@@ -330,6 +330,19 @@ function batchFlagsAfter(
 
   return ledger.batchFlags.map((flag) => {
     const answer = decision.answers[flag.id];
+
+    // `N0` carries no control and no owner: it says the notes were not read,
+    // and reading that is the whole of its answer. It stands answered like
+    // any other notice, and the re-open below is `P1+P2`'s alone — a Deal
+    // becoming sendable tells the Reviewer nothing new about a missing key.
+    if (flag.rule === "N0") {
+      return {
+        ...flag,
+        cleared: flag.cleared || answer !== undefined,
+        refused: null,
+      };
+    }
+
     const stage =
       answer !== undefined && answer !== true && "stage" in answer
         ? answer.stage

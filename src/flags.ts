@@ -12,8 +12,10 @@
  * *which* flags exist, not whether each is answered.
  *
  * The screener's notice Warns — N1 and N2, the two suspicions no rule can
- * reach — join this node with the ticket that brings the model call
- * (ADR-0002). Nothing here reads free prose.
+ * reach — are attached here too (#55), from what the model returned in
+ * `screener.ts`. Nothing in this file reads free prose: it is handed a kind per
+ * candidate and never a quote, which is what keeps the model unable to narrate
+ * (ADR-0002).
  */
 
 import * as z from "zod";
@@ -23,6 +25,7 @@ import type {
   Ledger,
   PersonCandidate,
 } from "./candidates.ts";
+import type { Kind } from "./screener.ts";
 
 /**
  * What the reviewer's answer writes onto a flag (#54), candidate flag and
@@ -61,7 +64,15 @@ const answerable = {
  */
 export const Flag = z.object({
   id: z.string(),
-  rule: z.enum(["B1", "W1", "D1"]),
+  /**
+   * `N1+N2` is one notice carrying both kinds, named the way `P1+P2` is: one
+   * flag is one *problem*, and the name carries every half the surface renders
+   * a sentence for. The list stays closed, which is the point of a closed kind
+   * list in the first place.
+   * ponytail: two kinds make three names. A third would make seven, and the
+   * kinds would want to leave the name for a field of their own.
+   */
+  rule: z.enum(["B1", "W1", "D1", "N1", "N2", "N1+N2"]),
   level: z.enum(["stop", "warn"]),
   /** A Warn is a decision or a notice. A Stop is neither. */
   kind: z.enum(["decision", "notice"]).nullable(),
@@ -93,14 +104,33 @@ export type Flag = z.infer<typeof Flag>;
  * likewise derived from those candidates as they stand, which is why no count
  * is stored here either.
  */
-export const BatchFlag = z.object({
-  id: z.string(),
-  rule: z.literal("P1+P2"),
-  level: z.literal("warn"),
-  kind: z.literal("decision"),
-  stage: z.string(),
-  ...answerable,
-});
+export const BatchFlag = z.discriminatedUnion("rule", [
+  z.object({
+    id: z.string(),
+    rule: z.literal("P1+P2"),
+    level: z.literal("warn"),
+    kind: z.literal("decision"),
+    stage: z.string(),
+    ...answerable,
+  }),
+  /**
+   * `N0` — the research notes were not read, because there was no model key.
+   * A notice, so the Reviewer must acknowledge it like any other Warn: a
+   * missing key never silently produces a batch that looks clean (ADR-0002).
+   * It is the one flag raised by the *absence* of the screener, which is why
+   * it sits on the batch and not on the eight candidates it did not read.
+   *
+   * It is answerable like every other flag and carries no control of its own:
+   * `true` is the whole of what its answer can say.
+   */
+  z.object({
+    id: z.string(),
+    rule: z.literal("N0"),
+    level: z.literal("warn"),
+    kind: z.literal("notice"),
+    ...answerable,
+  }),
+]);
 export type BatchFlag = z.infer<typeof BatchFlag>;
 
 /** The ledger once checked: every candidate carrying the flags it earned. */
@@ -127,38 +157,67 @@ export interface CheckedLedger {
  *   One Stop, naming every sibling that caused it, offering **no** override;
  *   it is cleared by completing the account.
  *
- * D1 reads *not Clear or answered* exactly as ADR-0005 writes it, so an
- * unanswered **Warn** on a sibling holds the Deal as surely as a Stop does.
- * That is inert today — no deterministic rule raises a Warn on a Person or a
- * Company — but the screener's N1 and N2 will, and Heliograph's and Lattice
- * Forge's Deals would then wait on a notice nobody has ticked yet. Whether a
- * notice should hold a Deal at all is a question for the ticket that brings
- * the screener; the batch cannot export with an unanswered Warn regardless, so
- * nothing reaches Attio either way.
+ * D1 reads *not Clear or answered* as ADR-0005 writes it, **less notices** —
+ * the question #53 left for the ticket that brought the screener, answered in
+ * that ADR's own amendment. Both failures it exists to prevent come from a
+ * Person who is not sent, and a notice does not withhold one: a Warn excludes
+ * nothing, so the account is whole and its Deal has someone to attach to. The
+ * export gate is what still guarantees the notice was read, since the batch
+ * cannot export with an unanswered Warn.
  *
  * The rules the settled set also holds — B2, W2, W3, and the Stop on a Deal
  * whose `Owner` is empty — are not built. No W34 row reaches any of them, so
  * each would be a rule with nothing to answer for it.
  * ponytail: add one the week a batch first contains it.
+ *
+ * `notices` is the screener's reading, keyed by the Person candidate that
+ * carries it. `null` is not the same as empty: **empty** is *the notes were
+ * read and raised nothing*, and `null` is *nothing read them*, which is the one
+ * thing that raises the `N0` batch flag.
  */
-export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
-  const people = ledger.people.map((person) => ({
-    ...person,
-    flags: person.email.trim()
-      ? []
-      : [
-          {
-            id: `B1:${person.id}`,
-            rule: "B1" as const,
-            level: "stop" as const,
-            kind: null,
-            override: true,
-            siblings: [],
-            cleared: false,
-            refused: null,
-          },
-        ],
-  }));
+export function checkFlags(
+  ledger: Ledger,
+  stage: string,
+  notices: Map<string, Kind[]> | null,
+): CheckedLedger {
+  const people = ledger.people.map((person) => {
+    const flags: Flag[] = [];
+
+    if (!person.email.trim()) {
+      flags.push({
+        id: `B1:${person.id}`,
+        rule: "B1",
+        level: "stop",
+        kind: null,
+        override: true,
+        siblings: [],
+        cleared: false,
+        refused: null,
+      });
+    }
+
+    // One notice, carrying every kind the screener raised on this person. The
+    // rule name is the whole of what travels: the Reviewer reads a fixed
+    // sentence per kind and their own notes, never the model's words.
+    const kinds = notices?.get(person.id);
+    if (kinds?.length) {
+      // Parsed rather than cast: the closed list this file argues for is
+      // enforced at the one place a rule name is built rather than written.
+      const rule = Flag.shape.rule.parse(kinds.join("+"));
+      flags.push({
+        id: `${rule}:${person.id}`,
+        rule,
+        level: "warn",
+        kind: "notice",
+        override: false,
+        siblings: [],
+        cleared: false,
+        refused: null,
+      });
+    }
+
+    return { ...person, flags };
+  });
 
   // No deterministic rule raises a flag on a Company, so they pass through as
   // the transform proposed them — and a Company is never held by its People
@@ -189,10 +248,12 @@ export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
     // candidate in the account and B2 would otherwise slip past. The Deal's
     // own W1 is not in it: the reviewer answering that flag is the whole point
     // of the review, and a flag cannot be its own reason to wait.
+    // A notice is not among them: it says nothing about whether the account is
+    // whole, and the export gate already has the Reviewer read it.
     const siblings = [
       ...peopleOn(deal.companyId),
       ...companies.filter((company) => company.id === deal.companyId),
-    ].filter((sibling) => sibling.flags.length > 0);
+    ].filter((sibling) => sibling.flags.some((flag) => flag.kind !== "notice"));
 
     // One Stop, however many siblings: the problem is *this account is not
     // whole*, and it is cleared once, by completing it.
@@ -212,19 +273,34 @@ export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
     return { ...deal, flags };
   });
 
+  const batchFlags: BatchFlag[] = [
+    {
+      id: "P1+P2:batch",
+      rule: "P1+P2",
+      level: "warn",
+      kind: "decision",
+      stage,
+      cleared: false,
+      refused: null,
+    },
+  ];
+
+  // No key, so nothing read the notes. The Reviewer is told so, rather than
+  // handed a batch that looks clean (ADR-0002).
+  if (!notices) {
+    batchFlags.push({
+      id: "N0:batch",
+      rule: "N0",
+      level: "warn",
+      kind: "notice",
+      cleared: false,
+      refused: null,
+    });
+  }
+
   return {
     ...candidateState({ companies, people, deals }, new Set()),
-    batchFlags: [
-      {
-        id: "P1+P2:batch",
-        rule: "P1+P2",
-        level: "warn",
-        kind: "decision",
-        stage,
-        cleared: false,
-        refused: null,
-      },
-    ],
+    batchFlags,
   };
 }
 
@@ -256,8 +332,13 @@ export function candidateState(
 ): Pick<CheckedLedger, "companies" | "people" | "deals"> {
   const stopped = (candidate: { flags: Flag[] }) =>
     candidate.flags.some((flag) => !flag.cleared && flag.level === "stop");
+  // A notice is not among what an account waits on — the same reading D1's
+  // siblings are filtered by above (#55). It says nothing about whether the
+  // account is whole, and the export gate already has the Reviewer read it.
+  // Counting one here would hold a Deal that carries no D1 to say why.
   const outstanding = (candidate: { held: boolean; flags: Flag[] }) =>
-    candidate.held || candidate.flags.some((flag) => !flag.cleared);
+    candidate.held ||
+    candidate.flags.some((flag) => !flag.cleared && flag.kind !== "notice");
 
   const companies = proposed.companies.map((company) => ({
     ...company,

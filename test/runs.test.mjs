@@ -35,6 +35,10 @@ const DB_PATH = join(tmpdir(), `notion2attio-${randomUUID()}.sqlite`);
 process.env.DATABASE_PATH = DB_PATH;
 process.env.NOTION_OAUTH_CLIENT_ID = "test-client-id";
 process.env.NOTION_OAUTH_CLIENT_SECRET = "test-client-secret";
+// No model key: nothing here is about the notes screener, and `dotenv` never
+// overwrites what is already set, so a developer's own `.env` cannot reach the
+// real API from a test.
+process.env.OPENAI_API_KEY = "";
 
 const { default: app } = await import("../src/app.ts");
 const { graph } = await import("../src/graph.ts");

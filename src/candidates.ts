@@ -124,6 +124,21 @@ export const normalisedDomain = (website: string): string =>
 const text = (row: SourceRow, property: string): string => row[property] ?? "";
 
 /**
+ * The Person candidate a source row lands on.
+ *
+ * The key is normalised so that two spellings of one address cannot become two
+ * People that Attio would upsert onto one record — the same failure the domain
+ * repair prevents. The *value* is left exactly as Notion gave it, so this
+ * asserts nothing and is not a repair to log.
+ *
+ * Exported because the screener resolves a row's notice through it (#55):
+ * matching a candidate's `sourceId` would lose the notice on the second of two
+ * rows that collapsed onto one Person.
+ */
+export const personIdOf = (row: SourceRow): string =>
+  `person:${text(row, "Work email").trim().toLowerCase() || text(row, "Source ID")}`;
+
+/**
  * What the candidate ledger renders (#10): every candidate on screen, with the
  * repair log shown in place against the values it changed. The wire splits the
  * two — `candidates` grouped by object, `repairs` beside it — because Attio
@@ -190,11 +205,7 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
     }
 
     const email = text(row, "Work email");
-    // The key is normalised so that two spellings of one address cannot become
-    // two People that Attio would upsert onto one record — the same failure the
-    // domain repair prevents. The *value* is left exactly as Notion gave it, so
-    // this asserts nothing and is not a repair to log.
-    const personId = `person:${email.trim().toLowerCase() || sourceId}`;
+    const personId = personIdOf(row);
     if (!people.has(personId)) {
       people.set(personId, {
         id: personId,

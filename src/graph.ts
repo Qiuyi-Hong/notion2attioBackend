@@ -4,8 +4,8 @@
  * the `thread_id` and the checkpoint file is the whole read model.
  *
  * Four nodes so far — read the batch, propose candidates from it, check them,
- * then pause for the Reviewer. `check` holds the deterministic rules today;
- * the screener's two notice Warns join it with the model call (ADR-0002).
+ * then pause for the Reviewer. `check` holds the deterministic rules and the
+ * one model call the pipeline makes, which may only raise a flag (ADR-0002).
  *
  * `docs/research/langgraph-hitl.md` is where the API facts below were verified.
  */
@@ -33,6 +33,7 @@ import config from "./config/config.ts";
 import { BatchFlag, checkFlags } from "./flags.ts";
 import { findSharedDataSource, queryBatchRows } from "./notion.ts";
 import { applyDecision, type Decision, wasRefused } from "./review.ts";
+import { noticesOf, Screening, screenNotes } from "./screener.ts";
 import { readConnection } from "./store.ts";
 
 /**
@@ -66,6 +67,12 @@ export const State = new StateSchema({
   repairs: z.array(Repair).default(() => []),
   /** Asked once, in one place, before the files are made. */
   batchFlags: z.array(BatchFlag).default(() => []),
+  /**
+   * The screening log, beside the repair log. `null` until `check` has run,
+   * and still `null` afterwards when there was no key — which is what the
+   * `N0` batch flag says out loud.
+   */
+  screening: Screening.nullable().default(() => null),
 });
 
 const read: GraphNode<typeof State> = async (state) => {
@@ -91,12 +98,27 @@ const transform: GraphNode<typeof State> = (state) =>
   candidatesFrom(state.sourceRows);
 
 /**
- * The deterministic rules, over the candidates the transform proposed. Pure,
- * and the whole of it lives in `flags.ts`. The candidate set and the flag set
- * are frozen the moment this returns (ADR-0004).
+ * The deterministic rules, over the candidates the transform proposed, and the
+ * screener's notices beside them. The candidate set and the flag set are frozen
+ * the moment this returns (ADR-0004).
+ *
+ * The model call lives **here**, before the interrupt, rather than in `review`:
+ * an interrupted node re-runs from the top, so a call there would be charged
+ * again on every resume and could return different notices under the Reviewer
+ * mid-decision (ADR-0002). Screened here, the same run shows the same notices
+ * every time it is looked at.
  */
-const check: GraphNode<typeof State> = (state) =>
-  checkFlags(state, config.dealStage);
+const check: GraphNode<typeof State> = async (state) => {
+  const screening = await screenNotes(state.sourceRows);
+  return {
+    ...checkFlags(
+      state,
+      config.dealStage,
+      screening && noticesOf(state.sourceRows, screening),
+    ),
+    screening,
+  };
+};
 
 /**
  * The first pause, and the reviewer's decision landing on it (#54).
