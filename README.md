@@ -151,7 +151,7 @@ whole point: it is what stops a batch being handed off twice.
 
 ## What the reviewer sees
 
-![The candidate ledger over the 2026-W34 batch: 8 source rows become 21 candidates, Brightyard's two rows merge into one Company, Tern Mobility's Person is Held for a missing work email, two notices carry verbatim quotes from the research notes, and export is refused while batch questions are unanswered.](docs/figures/review-screen-prototype.png)
+![Prototype of the candidate ledger over the 2026-W34 batch: the eight source rows become candidates grouped into Companies, People and Deals; Brightyard's two rows merge into one Company; Tern Mobility's Person is Held for a missing work email; two notices carry verbatim quotes from the research notes; and export is refused while the batch flag and its Warns are unanswered.](docs/figures/review-screen-prototype.png)
 
 **This is a prototype, not the shipped screen** — Variant B of the three built to answer
 [#10](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/10), on branch
@@ -159,11 +159,20 @@ whole point: it is what stops a batch being handed off twice.
 It is the primary source the real ledger was built from, and it runs over the real W34
 batch, but it is a throwaway artefact and nothing in it is wired to the pipeline.
 
-Four things in it carry the argument above. `8 source rows → 21 candidates` — the unit
-changed. Brightyard is one Company marked `2 rows merged`, where the sheet's formula makes
-two. The two notices quote the research notes **verbatim** and say plainly what they are
-worth: *nothing to change — this pipeline never reads Attio, so it can relay the note but
-cannot check it*. And export is refused, with its reason, rather than failing on click.
+Four things in it carry the argument above. The header states the whole move in one line —
+**source rows in, candidates out** — and the tables below it are grouped by the Attio
+object each becomes, so what the reviewer reads matches what they will import. Brightyard
+is one Company marked `2 rows merged`, where the sheet's formula makes two. The two
+notices quote the research notes **verbatim** and say plainly what they are worth:
+*nothing to change — this pipeline never reads Attio, so it can relay the note but cannot
+check it*. And export is refused, with its reason, rather than failing on click.
+
+Being a prototype costs it one number, and the cost is worth showing rather than
+retouching: its header reads `21 candidates`, where the built pipeline derives **22** —
+7 Company, 8 Person, 7 Deal, printed by `npm run w34:derive` and tabled below. The
+prototype was drawn before the transform existed and nothing recomputes it. The rule
+this write-up states elsewhere applies to its own figure: where the two disagree, the
+derived output is right.
 
 **There is no figure of the Notion write-back, and its absence is the point.** The obvious
 second figure is `CRM status = Imported` on the seven rows — the column the spreadsheet

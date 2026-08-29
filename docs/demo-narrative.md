@@ -62,9 +62,11 @@ The run pauses at `awaiting_review` and `/runs/:runId` renders the candidate led
 is the screen the write-up's figure comes from, and there are four things to point at,
 in this order:
 
-1. **`8 source rows → 21 candidates`.** The unit changed. This is
+1. **Eight source rows in, 22 candidates out** — 7 Company, 8 Person, 7 Deal, as
+   `npm run w34:derive` prints them. The unit changed. This is
    [ADR-0001](adr/0001-flags-attach-to-candidate-records.md) made visible, and everything
-   else follows from it.
+   else follows from it. (The prototype's header reads `21`; it was drawn before the
+   transform existed. Quote the derived number, not the picture.)
 2. **Brightyard, `2 rows merged`.** Two source rows, one Company. The sheet's `Domain`
    formula lands these one character apart and creates two companies; here they are one.
    This is the single most load-bearing claim in the write-up, and it is on screen.
@@ -73,8 +75,14 @@ in this order:
    the model earns, and the panel says what it is worth: *nothing to change — this
    pipeline never reads Attio, so it can relay the note but cannot check it.* A model
    added attention and removed none.
-4. **Export is refused.** `Not ready yet`, with the reason: two batch questions and three
-   unanswered warnings. A guard is a screen, not an error.
+4. **Export is refused.** `Not ready yet`, with the reason: the batch flag unanswered, and
+   the three Warns above it — Brightyard's decision and the two notices. A guard is a
+   screen, not an error.
+
+   The prototype's counter reads *two* batch questions here. The shipped ledger asks
+   **one**: [#18](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/18) merged
+   `Deal owner` and `Deal stage` into the single `P1+P2` flag the reviewer answers once
+   (`src/flags.ts`). Narrate the shipped number.
 
 Then answer the ledger: supply the deal owner and stage (asked once, for all seven),
 take Brightyard as **one deal**, and **leave Tern Mobility held**. Holding Tern is the
