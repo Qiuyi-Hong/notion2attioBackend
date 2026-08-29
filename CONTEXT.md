@@ -6,6 +6,18 @@ Glossary for the weekly handoff of qualified accounts from Notion into Attio. Te
 
 One week's worth of qualified accounts, identified by the Notion `Batch` value (e.g. `2026-W34`) and filtered to `CRM status = Ready for CRM`. The unit the reviewer works through, and the unit the files are made from.
 
+## Connection
+
+The permission a person grants that lets the pipeline read a Notion workspace and write back to it. A connection names one workspace, and covers only the pages that person chose to share — never the whole workspace. It is granted once and lasts until that person withdraws it.
+
+There is one connection at a time. Without it there is no batch to read: the connection, not the batch, is what the pipeline needs before it can start.
+
+## Run
+
+One pass of the pipeline over one batch — read the batch, propose candidates, pause for the Reviewer, make the files, pause again, and write the outcome back to Notion.
+
+A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A batch may be attempted by more than one run — a run that ends without a confirmed handoff leaves the batch to be picked up again.
+
 ## Source row
 
 One row of the Notion export. A source row describes a company **and** a person together. It is the pipeline's input and nothing else — it is not the unit of review, and it is not what goes into Attio.

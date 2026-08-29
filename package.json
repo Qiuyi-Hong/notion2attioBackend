@@ -18,7 +18,12 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "notion:setup": "bash scripts/notion-setup-wizard.sh",
     "notion:check": "node scripts/check-notion-fixture.mjs",
-    "notion:seed": "node scripts/seed-notion-source-db.mjs"
+    "notion:seed": "node scripts/seed-notion-source-db.mjs",
+    "attio:setup": "bash scripts/attio-setup-wizard.sh",
+    "attio:schema": "node scripts/probe-attio.mjs schema",
+    "attio:probes": "node scripts/probe-attio.mjs csv",
+    "attio:readback": "node scripts/probe-attio.mjs readback",
+    "attio:templates": "node scripts/inspect-attio-templates.mjs"
   },
   "dependencies": {
     "body-parser": "^2.3.0",
