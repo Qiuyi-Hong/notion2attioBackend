@@ -18,7 +18,15 @@ There is one connection at a time. Without it there is no batch to read: the con
 
 One pass of the pipeline over one batch — read the batch, propose candidates, pause for the Reviewer, make the files, pause again, and write the outcome back to Notion.
 
-A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A run is not *only* reachable that way, though: a run that nobody remembers can still be found, because a run whose second pause is never answered leaves work already done in Attio and no record of it in Notion. A batch may be attempted by more than one run — a run that ends without a confirmed handoff leaves the batch to be picked up again.
+A run is the unit that pauses and resumes; it can outlive the browser tab that started it, and the second pause is expected to last hours. A run is addressed by its own identifier, which is the only thing a browser has to remember. A run is not *only* reachable that way, though: a run that nobody remembers can still be found, because a run whose second pause is never answered leaves work already done in Attio and no record of it in Notion.
+
+A batch may be attempted by more than one run, but only **one after another**. A batch that a run still holds cannot be started again: the second run would read the same rows and make the same Deals, and Attio would create every one of them twice. A run holds its batch until it finishes — either it confirms the handoff, or the reviewer cancels it.
+
+## Cancelling a run
+
+The reviewer's act of ending a run without a confirmed handoff, which releases the batch for another run.
+
+After the files are made, cancelling is an **attestation**, in the same way confirming is: it states that the files did not reach Attio. It is not a way to undo an import, because nothing can undo one. A reviewer who has already imported the files and then finds a mistake confirms the run instead, and corrects the records in Attio by hand — confirming is what stops the batch being handed off a second time.
 
 ## Handoff bundle
 
@@ -128,3 +136,11 @@ This is the reviewer-facing counterpart of the rule on silent repairs. The pipel
 Two or more source rows in the same batch that resolve to one candidate on evidence the pipeline holds — a shared company domain after silent repair, or a shared work email address.
 
 Contrast with a **suspicion**: an assertion in the `Research notes` about records outside the batch, which the pipeline cannot check because it never reads Attio. A suspicion can only ever become a notice.
+
+## Re-qualification
+
+A person setting an already-imported source row back to `Ready for CRM`, under a later batch. It happens in Notion, by hand; the pipeline neither performs it nor detects it.
+
+A re-qualified row produces a second Deal candidate for an account Attio already holds, and Attio creates a second Deal. That deal is **not** a duplicate. A company has many opportunities over its life, and the person who re-qualified the row asserted that this is another one. The pipeline takes the assertion as given, exactly as it takes every other value the source of truth gives it.
+
+This is the third member of the set above. A **proven duplicate** is a repeat the pipeline can see and resolve. A **suspicion** is a repeat the pipeline is told about and cannot check. A re-qualification is a repeat that is correct, and so needs neither.

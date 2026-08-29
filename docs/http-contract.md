@@ -60,16 +60,35 @@ This costs one Notion query and earns three things: the pre-run screen, an hones
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/runs` | Body `{ batch }`. Returns **`202`** with `{ runId }` immediately; the graph runs on. |
+| `POST /api/runs` | Body `{ batch }`. Returns **`202`** with `{ runId }` immediately; the graph runs on. `409 batch_in_progress` if another run still holds the batch. |
 | `GET /api/runs` | Recent runs — `{ runId, batch, createdAt, status }[]`. |
 | `GET /api/runs/:runId` | The snapshot. The one thing the browser polls. |
 | `POST /api/runs/:runId/review` | The reviewer's decision document. |
 | `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio. |
 | `POST /api/runs/:runId/continue` | Restarts a `stalled` run from its last checkpoint. |
 | `GET /api/runs/:runId/files/:fileId` | The CSV bytes, from the checkpoint. |
-| `DELETE /api/runs/:runId` | Deletes the run. |
+| `DELETE /api/runs/:runId` | Cancels the run and releases its batch. After the files exist, this is an attestation — see below. |
 
 `POST /api/runs` returns `202` rather than blocking, because the run reads Notion and then makes up to eight model calls ([#9](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/9)) before it first pauses — plausibly 20–40 seconds. Returning the identifier immediately means the run's URL is shareable before the work finishes, and a reload during startup cannot orphan a run.
+
+### One live run per batch
+
+`POST /api/runs` first asks the `runs` table whether another run still holds this batch, and returns `409 batch_in_progress` with `details: { runId }` if one does ([ADR-0006](./adr/0006-a-repeat-deal-for-a-known-account-is-not-a-duplicate.md)).
+
+Without the guard, a reviewer who leaves a run at `awaiting_confirmation` and forgets it can start the batch again. Nothing has flipped to `Imported` yet, so the second run reads the same rows and emits the same deals — and [#2](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/2) found deals always create, with no undo.
+
+**Only `done` releases a batch.** A `done` run has written `Imported` to Notion, so its rows leave the filter anyway and a new run over the same batch returns exactly the rows still waiting — [#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29)'s batch-as-unit-of-retry, untouched. Every other state holds the batch, `failed` included: the contract keeps no failure record, so a `failed` run reads as `stalled` after a restart, and a node can throw *after* the export, leaving files a reviewer may already have downloaded.
+
+The code is new rather than a reuse of `wrong_stage`, which is about one run at the wrong pause. This is about a batch another run holds, and the browser must tell them apart to offer *"open the run that already exists"* — which is what `GET /api/runs` is for.
+
+### Cancelling — `DELETE /api/runs/:runId`
+
+Deletes the run and releases its batch. Before the files exist it is unremarkable. At `awaiting_confirmation` it is an **attestation**, the mirror of `/confirm`: it states that these files did **not** reach Attio.
+
+That distinction is load-bearing because [ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md) makes cancelling the only escape once export locks the values, and describes it as *"abandoning the run and starting a new one"*. Followed literally by a reviewer who has already imported, that escape **is** the duplicate-deal error. So the reviewer chooses on a fact only they hold:
+
+- **The files never reached Attio** — cancel. The batch is released, and the next run creates each deal once.
+- **The files reached Attio and something is wrong** — **confirm**, then correct the records in Attio by hand. Confirming is what flips `CRM status` and stops the batch being handed off a second time; nothing can undo an import, and cancelling does not pretend to.
 
 ## Run states
 
@@ -164,6 +183,7 @@ One shape, one closed list of codes.
 | `not_connected` | `409` |
 | `no_such_run` | `404` |
 | `wrong_stage` | `409` |
+| `batch_in_progress` | `409` |
 | `invalid_payload` | `400` |
 | `notion_failed` | `502` |
 
