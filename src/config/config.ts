@@ -7,7 +7,10 @@ interface Config {
   nodeEnv: string;
   /** Where the browser is sent back to after Notion's consent screen. */
   frontendOrigin: string;
-  /** The one SQLite file. Holds the Connection and the pending authorisation. */
+  /**
+   * The one SQLite file. Holds the Connection, the pending authorisation, the
+   * runs, and the checkpoints the graph writes.
+   */
   databasePath: string;
   notion: {
     clientId: string;

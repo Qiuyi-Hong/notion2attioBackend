@@ -38,6 +38,7 @@ process.env.NOTION_OAUTH_CLIENT_SECRET = "test-client-secret";
 
 const { default: app } = await import("../src/app.ts");
 const { graph } = await import("../src/graph.ts");
+const { startRun } = await import("../src/runs.ts");
 
 const CARPE_LAB = {
   access_token: "ntn_live_token",
@@ -234,6 +235,29 @@ test("a batch a live run still holds cannot be started again", async () => {
   const { error } = await res.json();
   assert.equal(error.code, "batch_in_progress");
   assert.equal(error.details.runId, runId, "it names the run that holds it");
+});
+
+test("two simultaneous starts put one run on the batch, not two", async () => {
+  // Straight at the guard rather than through two sockets: deciding whether a
+  // batch is free reads each run's checkpoint, and that await is the window a
+  // double-clicked Start would otherwise slip through.
+  const [first, second] = await Promise.all([
+    startRun(TARGET_BATCH),
+    startRun(TARGET_BATCH),
+  ]);
+
+  const started = [first, second].filter((answer) => "run" in answer);
+  const refused = [first, second].filter((answer) => "heldBy" in answer);
+  assert.equal(started.length, 1, "one run was started");
+  assert.equal(refused.length, 1, "the other was refused");
+  assert.equal(refused[0].heldBy, started[0].run.runId, "it names the holder");
+  assert.equal(
+    (await (await fetch(`${base}/api/runs`)).json()).length,
+    1,
+    "one row, so the batch is held once",
+  );
+
+  await reaches(started[0].run.runId, "awaiting_review");
 });
 
 test("another batch is unaffected by the one being held", async () => {

@@ -141,6 +141,17 @@ interface NotionPage {
   properties?: Record<string, NotionProperty | undefined>;
 }
 
+/**
+ * A query filter, with the asymmetry spelled out: a leg names the property's
+ * *type* as its key, and Notion rejects one that does not match. Saying so here
+ * makes a wrong key a compile error rather than a `validation_error` at
+ * runtime.
+ */
+type NotionFilter =
+  | { property: string; status: { equals: string } }
+  | { property: string; select: { equals: string } }
+  | { and: NotionFilter[] };
+
 /** One row of the Notion export: its property names against plain values. */
 export type SourceRow = Record<string, string | null>;
 
@@ -152,7 +163,7 @@ export type SourceRow = Record<string, string | null>;
 async function* queryPages(
   accessToken: string,
   dataSourceId: string,
-  filter: unknown,
+  filter: NotionFilter,
   clause: string,
 ): AsyncGenerator<NotionPage> {
   let cursor: string | undefined;

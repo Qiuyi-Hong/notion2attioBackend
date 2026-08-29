@@ -13,7 +13,6 @@ import {
   cancelRun,
   continueRun,
   listRuns,
-  runHolding,
   snapshotOf,
   startRun,
   statusOf,
@@ -23,7 +22,7 @@ import { readRun, type RunRecord } from "../store.ts";
 const router = Router();
 
 /** An unknown run id is a real lookup miss, never an empty snapshot. */
-function find(runId: string | undefined): RunRecord {
+function requireRun(runId: string | undefined): RunRecord {
   const run = runId ? readRun(runId) : undefined;
   if (!run) throw new ApiError("no_such_run", 404, "No such run.");
   return run;
@@ -35,21 +34,21 @@ router.post("/", async (req, res) => {
     throw new ApiError("invalid_payload", 400, "A batch is required.");
   }
 
-  const holder = await runHolding(batch);
-  if (holder) {
+  const started = await startRun(batch);
+  if ("heldBy" in started) {
     // Naming the run points at the work rather than merely blocking: the
     // browser offers "open the run that already exists".
     throw new ApiError(
       "batch_in_progress",
       409,
       `${batch} is already being handed off.`,
-      { runId: holder.runId },
+      { runId: started.heldBy },
     );
   }
 
   // The identifier comes back before the work finishes — the run reads Notion
   // and screens its rows before it first pauses, plausibly 20–40 seconds.
-  res.status(202).json({ runId: startRun(batch).runId });
+  res.status(202).json({ runId: started.run.runId });
 });
 
 router.get("/", async (_req, res) => {
@@ -57,7 +56,7 @@ router.get("/", async (_req, res) => {
 });
 
 router.get("/:runId", async (req, res) => {
-  res.json(await snapshotOf(find(req.params.runId)));
+  res.json(await snapshotOf(requireRun(req.params.runId)));
 });
 
 /**
@@ -65,7 +64,7 @@ router.get("/:runId", async (req, res) => {
  * offered **Continue** on, and after a restart they are the same picture.
  */
 router.post("/:runId/continue", async (req, res) => {
-  const run = find(req.params.runId);
+  const run = requireRun(req.params.runId);
   const status = await statusOf(run.runId);
   if (status !== "stalled" && status !== "failed") {
     throw new ApiError("wrong_stage", 409, `This run is ${status}.`);
@@ -80,7 +79,7 @@ router.post("/:runId/continue", async (req, res) => {
  * never how a Reviewer who has already imported gets out (they confirm).
  */
 router.delete("/:runId", async (req, res) => {
-  const run = find(req.params.runId);
+  const run = requireRun(req.params.runId);
   await cancelRun(run.runId);
   res.json({ cancelled: true });
 });

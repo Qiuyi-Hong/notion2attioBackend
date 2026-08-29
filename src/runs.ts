@@ -37,6 +37,9 @@ const working = new Set<string>();
 /** Nodes that threw since this process started. */
 const threw = new Set<string>();
 
+/** Batches whose guard is being decided right now, against the run deciding it. */
+const claiming = new Map<string, string>();
+
 const configFor = (runId: string) => ({ configurable: { thread_id: runId } });
 
 /**
@@ -81,15 +84,23 @@ export async function snapshotOf(run: RunRecord) {
   };
 }
 
-export async function listRuns() {
+/** Every run the file holds, each against the status its checkpoint gives it. */
+async function statuses(): Promise<{ run: RunRecord; status: RunStatus }[]> {
   return Promise.all(
     readRuns().map(async (run) => ({
-      runId: run.runId,
-      batch: run.batch,
-      createdAt: run.createdAt,
+      run,
       status: await statusOf(run.runId),
     })),
   );
+}
+
+export async function listRuns() {
+  return (await statuses()).map(({ run, status }) => ({
+    runId: run.runId,
+    batch: run.batch,
+    createdAt: run.createdAt,
+    status,
+  }));
 }
 
 /**
@@ -99,15 +110,10 @@ export async function listRuns() {
  * a second run would read the same rows and make the same Deals, and #2 found
  * Deals always create, with no undo.
  */
-export async function runHolding(
-  batch: string,
-): Promise<RunRecord | undefined> {
-  for (const run of readRuns()) {
-    if (run.batch === batch && (await statusOf(run.runId)) !== "done") {
-      return run;
-    }
-  }
-  return undefined;
+async function runHolding(batch: string): Promise<RunRecord | undefined> {
+  return (await statuses()).find(
+    ({ run, status }) => run.batch === batch && status !== "done",
+  )?.run;
 }
 
 /**
@@ -134,11 +140,34 @@ async function work(runId: string, input: { batch: string } | null) {
   }
 }
 
-/** The row exists before the caller is answered, so a reload cannot orphan it. */
-export function startRun(batch: string): RunRecord {
-  const run = insertRun(randomUUID(), batch);
-  void work(run.runId, { batch });
-  return run;
+/**
+ * Starts a run over a batch, or names the run that already holds it.
+ *
+ * The claim is taken **before the first `await`**, so a double-clicked Start
+ * cannot put two runs on one batch: reading each run's status is asynchronous,
+ * and without the claim both requests would pass the guard and both insert.
+ * The row itself exists before the caller is answered, so a reload during
+ * startup cannot orphan the run either.
+ *
+ * ponytail: the claim is this process's. Two Express processes would still
+ * both pass — the same single-process ceiling the resume lock has.
+ */
+export async function startRun(
+  batch: string,
+): Promise<{ run: RunRecord } | { heldBy: string }> {
+  const claimed = claiming.get(batch);
+  if (claimed) return { heldBy: claimed };
+  const runId = randomUUID();
+  claiming.set(batch, runId);
+  try {
+    const holder = await runHolding(batch);
+    if (holder) return { heldBy: holder.runId };
+    const run = insertRun(runId, batch);
+    void work(runId, { batch });
+    return { run };
+  } finally {
+    claiming.delete(batch);
+  }
 }
 
 /**
@@ -153,7 +182,15 @@ export async function continueRun(run: RunRecord): Promise<void> {
   void work(run.runId, snapshot.createdAt ? null : { batch: run.batch });
 }
 
-/** Deletes the run and releases its batch. */
+/**
+ * Deletes the run and releases its batch.
+ *
+ * ponytail: a run cancelled while a node is still executing is not stopped —
+ * `work()` deletes the checkpoint it leaves behind, and every node this far is
+ * read-only, so nothing outside is touched. From #52 a released batch could be
+ * started again while the old run is still dying; that wants a cancellation
+ * the graph can see.
+ */
 export async function cancelRun(runId: string): Promise<void> {
   deleteRun(runId);
   await checkpointer.deleteThread(runId);
@@ -165,11 +202,7 @@ export async function cancelRun(runId: string): Promise<void> {
  * confirmation pause, and this says so by deriving it rather than by knowing.
  */
 export async function runsAwaitingConfirmation(): Promise<string[]> {
-  const stranded: string[] = [];
-  for (const run of readRuns()) {
-    if ((await statusOf(run.runId)) === "awaiting_confirmation") {
-      stranded.push(run.runId);
-    }
-  }
-  return stranded;
+  return (await statuses())
+    .filter(({ status }) => status === "awaiting_confirmation")
+    .map(({ run }) => run.runId);
 }

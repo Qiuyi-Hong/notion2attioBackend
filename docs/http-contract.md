@@ -98,7 +98,7 @@ A stored Connection answering `not_connected` is not a new contortion: [#49](htt
 | `GET /api/runs/:runId` | The snapshot. The one thing the browser polls. |
 | `POST /api/runs/:runId/review` | The reviewer's decision document. |
 | `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio — and, on a retry, the attestation that the write-back is being abandoned. |
-| `POST /api/runs/:runId/continue` | Restarts a `stalled` run from its last checkpoint. |
+| `POST /api/runs/:runId/continue` | Restarts a stopped run — `stalled`, or `failed` in the process that saw it throw — from its last checkpoint. |
 | `GET /api/runs/:runId/files/:fileId` | The CSV bytes, from the checkpoint. |
 | `DELETE /api/runs/:runId` | Cancels the run and releases its batch. After the files exist, this is an attestation — see below. |
 
