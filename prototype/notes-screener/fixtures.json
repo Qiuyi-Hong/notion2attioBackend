@@ -1,0 +1,62 @@
+{
+  "_comment": "PROTOTYPE FIXTURE — the 8 W34 rows from data/notion-qualified-accounts-w34.csv, with the labels this screener is graded against. `expect` is the set of notice kinds the row must produce; [] means the screener must stay silent. `why` records the reasoning so a later reader cannot quietly relabel a row to make a run pass.",
+  "batch": "2026-W34",
+  "rows": [
+    {
+      "sourceId": "QL-260818-001",
+      "account": "Northbeam Analytics",
+      "notes": "Priya is replacing a spreadsheet-based forecast. Asked whether implementation can start before the October planning cycle.",
+      "expect": [],
+      "why": "Benign. Nothing about an earlier contact or an earlier campaign."
+    },
+    {
+      "sourceId": "QL-260818-002",
+      "account": "Oriel Foods",
+      "notes": "Referred by Vale Partners. UK team owns the evaluation, but procurement is based in Dublin. Wants a discovery call next week.",
+      "expect": [],
+      "why": "Benign. A referring firm is not a prior contact with this person."
+    },
+    {
+      "sourceId": "QL-260819-003",
+      "account": "Tern Mobility",
+      "notes": "Met at Mobility Summit. Amina asked for the fleet partnerships deck. No work email was captured; LinkedIn is verified.",
+      "expect": [],
+      "why": "Benign for screening. The missing work email is a deterministic Stop (B1), not a notice, and the screener must not restate it."
+    },
+    {
+      "sourceId": "QL-260819-004",
+      "account": "Brightyard (Lewis Grant)",
+      "notes": "Lewis owns CRM hygiene and reporting. Their current process combines Pipedrive exports with a weekly agency spreadsheet.",
+      "expect": [],
+      "why": "Benign."
+    },
+    {
+      "sourceId": "QL-260819-005",
+      "account": "Brightyard (Marta Silva)",
+      "notes": "Marta controls budget and joined the same evaluation as Lewis. Treat this as a second contact at the existing account, not a second opportunity.",
+      "expect": [],
+      "why": "PRECISION TRAP. Tempting, and wrong. W1 already proves this duplicate deterministically from the shared domain; a notice on top of a decision Warn is noise on the one candidate the reviewer most needs to think about. ADR-0002: the note corroborates a fact the pipeline already holds, it does not supply one."
+    },
+    {
+      "sourceId": "QL-260820-006",
+      "account": "Heliograph Systems",
+      "notes": "Emily attended the RevOps teardown webinar and requested the migration checklist. She previously spoke to the team under another email address.",
+      "expect": ["N1"],
+      "why": "RECALL TARGET. Explicit earlier contact under a different email address."
+    },
+    {
+      "sourceId": "QL-260820-007",
+      "account": "Alder & Finch",
+      "notes": "Warm referral from Dani at North & Coast. Interested in replacing manual lead routing before hiring two additional SDRs.",
+      "expect": [],
+      "why": "PRECISION TRAP. Names a person outside the batch, but says nothing about a prior contact with Soren or a prior campaign touching him."
+    },
+    {
+      "sourceId": "QL-260820-008",
+      "account": "Lattice Forge",
+      "notes": "Noor replied from a newer email alias. Their LinkedIn profile and role match a person already researched in the spring campaign.",
+      "expect": ["N1", "N2"],
+      "why": "RECALL TARGET, and the co-occurrence case. Sentence one is N1 (a newer alias implies an earlier address); sentence two is N2. Graded as both — see the ticket's question 2."
+    }
+  ]
+}
