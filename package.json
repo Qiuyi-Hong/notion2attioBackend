@@ -22,7 +22,8 @@
     "attio:setup": "bash scripts/attio-setup-wizard.sh",
     "attio:schema": "node scripts/probe-attio.mjs schema",
     "attio:probes": "node scripts/probe-attio.mjs csv",
-    "attio:readback": "node scripts/probe-attio.mjs readback"
+    "attio:readback": "node scripts/probe-attio.mjs readback",
+    "attio:templates": "node scripts/inspect-attio-templates.mjs"
   },
   "dependencies": {
     "body-parser": "^2.3.0",
