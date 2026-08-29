@@ -1,8 +1,9 @@
-# ADR-0003: The server keeps its own record of runs
+# ADR-0009: The server keeps its own record of runs
 
 - **Status:** Accepted
 - **Date:** 2026-08-29
 - **Ticket:** [What is the HTTP contract between the browser and the graph?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16)
+- **Renumbered:** from `0003` by [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48). It was drafted concurrently with [ADR-0003 (companies)](./0003-a-company-candidate-is-never-dropped-with-its-people.md) and the two shared a number; the decision, its date and its content are unchanged.
 
 ## Context
 

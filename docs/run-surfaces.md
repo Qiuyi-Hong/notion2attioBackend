@@ -8,7 +8,7 @@ It is a specification, not an implementation. Nothing here is built yet.
 
 **The runs index is the front door.** There is no pre-run *screen*: the list of runs and the place a run is started are one surface, and the question it answers first is *what needs a human*, not *what would you like to start*.
 
-Chosen over a launcher whose root is one Start button (runs demoted to a footnote), and over a single continuous surface where the app simply *is* a run and the list hides in a header dropdown. The bet: [ADR-0003](adr/0003-the-server-keeps-its-own-record-of-runs.md) exists because a run can be lost between the CSV download and the confirmation, holding Attio deals that [#2](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/2) found cannot be undone. A surface that closes that hole by *accident* — a callout that happens to be on the page — is not the same as one that closes it by construction.
+Chosen over a launcher whose root is one Start button (runs demoted to a footnote), and over a single continuous surface where the app simply *is* a run and the list hides in a header dropdown. The bet: [ADR-0009](adr/0009-the-server-keeps-its-own-record-of-runs.md) exists because a run can be lost between the CSV download and the confirmation, holding Attio deals that [#2](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/2) found cannot be undone. A surface that closes that hole by *accident* — a callout that happens to be on the page — is not the same as one that closes it by construction.
 
 ## Routes
 
@@ -18,7 +18,7 @@ Browser routes. Distinct from [#16](https://github.com/Qiuyi-Hong/notion2attioBa
 | --- | --- |
 | `/` | Redirects to `/runs`. Nothing else lives at the root. |
 | `/runs` | The index: connection state, the start control, the table of runs. |
-| `/runs/:runId` | One run, rendered per its status — see below. `404` for an unknown id, per ADR-0003. |
+| `/runs/:runId` | One run, rendered per its status — see below. `404` for an unknown id, per ADR-0009. |
 
 ## The index
 
@@ -61,7 +61,7 @@ That sentence is the point of the row. "Waiting on you" says a person is needed;
 
 **Node-level progress is free. Per-call progress is not.**
 
-`snap.next` names the pending node — verified in [#3](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/3) — so a four-step indicator is derived from the checkpoint and needs **no new persisted field**. ADR-0003's rule that the runs table holds nothing derivable survives untouched.
+`snap.next` names the pending node — verified in [#3](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/3) — so a four-step indicator is derived from the checkpoint and needs **no new persisted field**. ADR-0009's rule that the runs table holds nothing derivable survives untouched.
 
 But the notes screener is **one node making up to eight model calls** ([#9](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/9)), and the checkpoint only moves at node boundaries:
 
@@ -76,7 +76,7 @@ So the indicator sits still for most of the wait. **This is shown, not hidden.**
 
 > Screening research notes — one call per row, nothing to report until all 8 are back
 
-The alternatives were both rejected: splitting the screener into eight nodes so each row checkpoints shapes the graph around a progress bar and multiplies checkpoint writes by eight; a progress channel outside the checkpoint is exactly the second source of truth ADR-0003 refused.
+The alternatives were both rejected: splitting the screener into eight nodes so each row checkpoints shapes the graph around a progress bar and multiplies checkpoint writes by eight; a progress channel outside the checkpoint is exactly the second source of truth ADR-0009 refused.
 
 A consequence worth stating plainly: with one honest transition per ~24 seconds, a progress bar, a step list and a spinner are the same object. The choice was never the widget — it was the sentence shown while nothing moves.
 
@@ -88,7 +88,7 @@ A consequence worth stating plainly: with one honest transition per ~24 seconds,
 
 `POST /api/runs` returns `202` with a `runId` and the browser **stays on `/runs`**. The new run appears as a live row at the top of the table. The address bar changes only when a person opens a run to work it.
 
-This reverses the reasoning in #16, which valued the run's URL being shareable before the work finishes. It is still shareable — the run's URL exists from the moment of the `202` and works from any browser. What changes is that **it is no longer the only handle**. The lost-link hole ADR-0003 named is closed structurally, by the index being the front door, rather than by hoping someone keeps a link. A URL you must remember is a worse recovery mechanism than a list you cannot miss.
+This reverses the reasoning in #16, which valued the run's URL being shareable before the work finishes. It is still shareable — the run's URL exists from the moment of the `202` and works from any browser. What changes is that **it is no longer the only handle**. The lost-link hole ADR-0009 named is closed structurally, by the index being the front door, rather than by hoping someone keeps a link. A URL you must remember is a worse recovery mechanism than a list you cannot miss.
 
 ## The connection, on this surface
 
