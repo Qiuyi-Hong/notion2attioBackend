@@ -24,6 +24,26 @@ import { Flag } from "./flags.ts";
 import type { SourceRow } from "./notion.ts";
 
 /**
+ * What the review writes onto every candidate, whichever object it becomes
+ * (#54). Both are read off in the ledger, in place against the values they
+ * describe, rather than in a decision log elsewhere.
+ *
+ * `held` is a **derived** field in ADR-0004's sense — read off the candidate's
+ * flags and the reviewer's holds, never typed in. It is computed in one place,
+ * `holds()`, and written here so the browser is never asked to re-derive a
+ * rule the server enforces.
+ *
+ * `overrides` names the fields the reviewer pinned: an edit differing from
+ * what the pipeline proposed stops following whatever it was derived from. It
+ * is the third of ADR-0004's three provenance marks — repaired, derived,
+ * overridden — and it is what stops `emit` re-deriving over a typed value.
+ */
+const reviewable = {
+  held: z.boolean().default(() => false),
+  overrides: z.array(z.string()).default(() => []),
+};
+
+/**
  * Keyed on its normalised domain — which is what collapses two spellings of
  * one website into one company, and why the repair below is load-bearing
  * rather than cosmetic.
@@ -35,6 +55,7 @@ export const CompanyCandidate = z.object({
   segment: z.string(),
   primaryLocation: z.string(),
   flags: z.array(Flag).default(() => []),
+  ...reviewable,
 });
 export type CompanyCandidate = z.infer<typeof CompanyCandidate>;
 
@@ -49,6 +70,7 @@ export const PersonCandidate = z.object({
   linkedIn: z.string(),
   leadSource: z.string(),
   flags: z.array(Flag).default(() => []),
+  ...reviewable,
 });
 export type PersonCandidate = z.infer<typeof PersonCandidate>;
 
@@ -58,6 +80,7 @@ export const DealCandidate = z.object({
   companyId: z.string(),
   owner: z.string(),
   flags: z.array(Flag).default(() => []),
+  ...reviewable,
 });
 export type DealCandidate = z.infer<typeof DealCandidate>;
 
@@ -166,6 +189,8 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         segment: text(row, "Segment"),
         primaryLocation: text(row, "HQ"),
         flags: [],
+        held: false,
+        overrides: [],
       });
       // The first row of an account settles the values its siblings share —
       // and the one they disagree on, `Lead source`, is on the Person.
@@ -174,6 +199,8 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         companyId,
         owner: text(row, "Owner"),
         flags: [],
+        held: false,
+        overrides: [],
       });
     }
 
@@ -190,6 +217,8 @@ export function candidatesFrom(sourceRows: SourceRow[]): Ledger {
         linkedIn: text(row, "LinkedIn"),
         leadSource: text(row, "Lead source"),
         flags: [],
+        held: false,
+        overrides: [],
       });
     }
   }

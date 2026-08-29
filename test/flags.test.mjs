@@ -240,6 +240,9 @@ test("an account on two rows asks once whether it is one opportunity", async () 
           kind: "decision",
           override: false,
           siblings: [],
+          // Unanswered, and refused nothing: the review has not run (#54).
+          cleared: false,
+          refused: null,
         },
       ],
       "one decision Warn, not one per source row",
@@ -381,10 +384,20 @@ test("with no key the notes go unread, and the batch says so out loud", async ()
   assert.equal(model.calls.length, 0, "and nothing read the notes");
 
   // A notice, so the reviewer must acknowledge it like any other Warn: a
-  // missing key never silently produces a batch that looks clean.
+  // missing key never silently produces a batch that looks clean. It is
+  // answerable like every other flag, and unanswered at the check pass.
   assert.deepEqual(
     batchFlags.filter((flag) => flag.kind === "notice"),
-    [{ id: "N0:batch", rule: "N0", level: "warn", kind: "notice" }],
+    [
+      {
+        id: "N0:batch",
+        rule: "N0",
+        level: "warn",
+        kind: "notice",
+        cleared: false,
+        refused: null,
+      },
+    ],
   );
 
   // It sits on the batch and on no candidate, because nothing was read about

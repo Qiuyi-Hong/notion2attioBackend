@@ -28,6 +28,30 @@ import type {
 import type { Kind } from "./screener.ts";
 
 /**
+ * What the reviewer's answer writes onto a flag (#54), candidate flag and
+ * batch flag alike.
+ *
+ * `cleared` is what the freeze permits to move: ADR-0004 fixes *which* flags
+ * exist at the check pass, not whether each is answered. A flag is cleared by
+ * answering it through its own control — never by editing a value near it.
+ * D1 has no control and clears itself, when the account it waits on is whole.
+ *
+ * `refused` names an answer that did not stand: the reviewer typed a work
+ * email that does not parse, or one another Person candidate already holds, or
+ * their batch-flag answer would have covered a Deal owner they had not been
+ * shown. It sits on the flag, so the problem appears on the candidate in the
+ * ledger where the reviewer is already working, rather than in a `400` on a
+ * response they will never see again.
+ */
+const answerable = {
+  cleared: z.boolean().default(() => false),
+  refused: z
+    .enum(["invalid_email", "duplicate_email", "new_owner"])
+    .nullable()
+    .default(() => null),
+};
+
+/**
  * One problem found on one candidate. The reviewer reads a fixed sentence for
  * the `rule`, so no prose travels on the wire — which is also what keeps a
  * model, when one arrives, unable to narrate (ADR-0002).
@@ -59,6 +83,7 @@ export const Flag = z.object({
    */
   override: z.boolean(),
   siblings: z.array(z.string()),
+  ...answerable,
 });
 export type Flag = z.infer<typeof Flag>;
 
@@ -86,6 +111,7 @@ export const BatchFlag = z.discriminatedUnion("rule", [
     level: z.literal("warn"),
     kind: z.literal("decision"),
     stage: z.string(),
+    ...answerable,
   }),
   /**
    * `N0` — the research notes were not read, because there was no model key.
@@ -93,12 +119,16 @@ export const BatchFlag = z.discriminatedUnion("rule", [
    * missing key never silently produces a batch that looks clean (ADR-0002).
    * It is the one flag raised by the *absence* of the screener, which is why
    * it sits on the batch and not on the eight candidates it did not read.
+   *
+   * It is answerable like every other flag and carries no control of its own:
+   * `true` is the whole of what its answer can say.
    */
   z.object({
     id: z.string(),
     rule: z.literal("N0"),
     level: z.literal("warn"),
     kind: z.literal("notice"),
+    ...answerable,
   }),
 ]);
 export type BatchFlag = z.infer<typeof BatchFlag>;
@@ -161,6 +191,8 @@ export function checkFlags(
         kind: null,
         override: true,
         siblings: [],
+        cleared: false,
+        refused: null,
       });
     }
 
@@ -179,6 +211,8 @@ export function checkFlags(
         kind: "notice",
         override: false,
         siblings: [],
+        cleared: false,
+        refused: null,
       });
     }
 
@@ -204,6 +238,8 @@ export function checkFlags(
         kind: "decision",
         override: false,
         siblings: [],
+        cleared: false,
+        refused: null,
       });
     }
 
@@ -229,6 +265,8 @@ export function checkFlags(
         kind: null,
         override: false,
         siblings: siblings.map((sibling) => sibling.id),
+        cleared: false,
+        refused: null,
       });
     }
 
@@ -242,6 +280,8 @@ export function checkFlags(
       level: "warn",
       kind: "decision",
       stage,
+      cleared: false,
+      refused: null,
     },
   ];
 
@@ -253,8 +293,86 @@ export function checkFlags(
       rule: "N0",
       level: "warn",
       kind: "notice",
+      cleared: false,
+      refused: null,
     });
   }
 
-  return { companies, people, deals, batchFlags };
+  return {
+    ...candidateState({ companies, people, deals }, new Set()),
+    batchFlags,
+  };
+}
+
+/**
+ * Candidate state, read off a candidate's flags and the reviewer's holds, and
+ * written onto the candidate (`CONTEXT.md`, *Candidate state*). One function,
+ * two callers — `check` raising the first flags, and the review applying the
+ * reviewer's answers — so the rules below are stated once and the browser is
+ * never asked to re-derive what the server enforces.
+ *
+ * Not named for the **Hold**, which the glossary reserves for the reviewer's
+ * own act. A hold is one of the three things read here, not the whole of it.
+ *
+ * - A candidate carrying an uncleared **Stop** is Held.
+ * - A Company's hold reaches its People and its Deal, because a person line
+ *   would create the company in Attio anyway (ADR-0004).
+ * - A **Deal** is the one candidate held by its *account* rather than by
+ *   itself (ADR-0005): only the irreversible object waits. That reading is
+ *   D1's, and it is applied here whether or not D1 was raised — the flag set
+ *   is frozen, so a Person the reviewer holds *after* the check pass can raise
+ *   no new Stop, and the Deal would otherwise reach Attio attached to nobody.
+ *
+ * D1 is therefore the one flag nothing answers: it is cleared here, by the
+ * account becoming whole, which is exactly what `CONTEXT.md` says clears it.
+ */
+export function candidateState(
+  proposed: Pick<CheckedLedger, "companies" | "people" | "deals">,
+  heldByReviewer: ReadonlySet<string>,
+): Pick<CheckedLedger, "companies" | "people" | "deals"> {
+  const stopped = (candidate: { flags: Flag[] }) =>
+    candidate.flags.some((flag) => !flag.cleared && flag.level === "stop");
+  // A notice is not among what an account waits on — the same reading D1's
+  // siblings are filtered by above (#55). It says nothing about whether the
+  // account is whole, and the export gate already has the Reviewer read it.
+  // Counting one here would hold a Deal that carries no D1 to say why.
+  const outstanding = (candidate: { held: boolean; flags: Flag[] }) =>
+    candidate.held ||
+    candidate.flags.some((flag) => !flag.cleared && flag.kind !== "notice");
+
+  const companies = proposed.companies.map((company) => ({
+    ...company,
+    held: heldByReviewer.has(company.id) || stopped(company),
+  }));
+
+  const people = proposed.people.map((person) => ({
+    ...person,
+    held:
+      heldByReviewer.has(person.id) ||
+      stopped(person) ||
+      companies.some(
+        (company) => company.id === person.companyId && company.held,
+      ),
+  }));
+
+  /** ADR-0005's *account*: the Company and its People, never the Deal itself. */
+  const whole = (companyId: string) =>
+    [
+      ...companies.filter((company) => company.id === companyId),
+      ...people.filter((person) => person.companyId === companyId),
+    ].every((sibling) => !outstanding(sibling));
+
+  const deals = proposed.deals.map((deal) => {
+    const accountWhole = whole(deal.companyId);
+    const flags = deal.flags.map((flag) =>
+      flag.rule === "D1" ? { ...flag, cleared: accountWhole } : flag,
+    );
+    return {
+      ...deal,
+      flags,
+      held: heldByReviewer.has(deal.id) || !accountWhole || stopped({ flags }),
+    };
+  });
+
+  return { companies, people, deals };
 }

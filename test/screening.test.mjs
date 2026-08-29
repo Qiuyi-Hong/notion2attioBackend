@@ -320,8 +320,12 @@ test("a notice does not hold its account's Deal", async () => {
       (candidate) => candidate.companyId === person.companyId,
     );
     // A notice says nothing about whether the account is whole, and the export
-    // gate already has the Reviewer read it.
-    assert.deepEqual(deal.flags, [], `${account}'s Deal is not held`);
+    // gate already has the Reviewer read it. Asserted on `held` as well as on
+    // the flags: a Deal held with no D1 to say why would pass the first half
+    // while the ledger said two things at once (#54).
+    assert.deepEqual(deal.flags, [], `${account}'s Deal raises no Stop`);
+    assert.equal(deal.held, false, `${account}'s Deal is not held`);
+    assert.equal(person.held, false, `${account}'s Person is not held`);
   }
 });
 
@@ -343,7 +347,19 @@ test("no prose the model wrote, and no confidence score, reaches the wire", asyn
   for (const notice of notices) {
     assert.deepEqual(
       Object.keys(notice).sort(),
-      ["id", "kind", "level", "on", "override", "rule", "siblings"],
+      // `cleared` and `refused` are the reviewer's own answer (#54), and
+      // neither is a place the model could put a word.
+      [
+        "cleared",
+        "id",
+        "kind",
+        "level",
+        "on",
+        "override",
+        "refused",
+        "rule",
+        "siblings",
+      ],
       "a notice carries a rule name and nothing to narrate with",
     );
   }
