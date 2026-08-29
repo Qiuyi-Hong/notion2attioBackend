@@ -6,12 +6,16 @@ job the spreadsheet cannot reach, and the evidence for it.
 
 The write-up and the source are the same link. Every claim below is checkable
 against files in this repo: the real workbook is
-[`data/crm-handoff-working.xlsx`](data/crm-handoff-working.xlsx), the real batch is
-[`data/notion-qualified-accounts-w34.csv`](data/notion-qualified-accounts-w34.csv),
-and every count here is printed by `node scripts/derive-w34.mjs`. Nothing is quoted
-from a ticket.
+[`data/crm-handoff-working.xlsx`](data/crm-handoff-working.xlsx), and the batch is
+the 8 rows of [`data/notion-source-seed.csv`](data/notion-source-seed.csv) that pass
+the filter `Batch = 2026-W34` **and** `CRM status = Ready for CRM` — the same rows as
+the export in
+[`data/notion-qualified-accounts-w34.csv`](data/notion-qualified-accounts-w34.csv).
+Every count drawn from the workbook or the batch is printed by `npm run w34:derive`,
+which opens both files itself. Nothing is quoted from a ticket — and where a ticket and
+the workbook disagree, this write-up follows the workbook and says so.
 
-Detail lives behind links — eight [ADRs](docs/adr/), four
+Detail lives behind links — nine [ADRs](docs/adr/), four
 [research notes](docs/research/), and a committed
 [worked example](docs/examples/handoff-2026-W34/) — so this stays short and the
 evidence stays reachable.
@@ -24,7 +28,7 @@ The workbook's `Start here` tab lists six steps:
 
 > 1. Filter the Notion database to `CRM status = Ready for CRM` and the current batch.
 > 2. Export the filtered view as CSV.
-> 3. Paste the exported rows into `Paste Notion Export`, beginning at A2.
+> 3. Paste the exported rows into `Paste Notion Export`, beginning at A2. Keep the headers in row 1.
 > 4. Review the generated rows in `Attio Upload`. Correct anything that looks wrong.
 > 5. Search Attio, then create or update the company and person and add the company to Qualified accounts.
 > 6. Once the batch is done, mark the source rows `Imported` in Notion.
@@ -99,13 +103,18 @@ duplicate-person traps stated in prose and nowhere else. And it **cannot** see t
 because it marks a *source row*, and a row cannot say *one company, two people, one
 opportunity*.
 
-The column named `Import state` sits beside it. It is worth reading the workbook rather
-than the description of it: **`Import state` has no formula at all, in any of the 50
-rows. The column is empty.** That is not an oversight — it is the same structural fact
+The column named `Import state` sits beside it, and it is worth reading the workbook
+rather than any description of it — this one included. The brief for this write-up asked
+for *"the `Domain` and `Import state` formulas quoted verbatim"*. **There is no
+`Import state` formula to quote: the column has none, in any of the 50 rows, and every
+cell in it is empty.** `Row check` is the column that computes readiness. Both facts are
+read straight out of the `.xlsx` by `npm run w34:derive`, which fails if either changes.
+
+The empty column is the better argument anyway, because it is the same structural fact
 as step 5. A spreadsheet has nowhere to record the outcome of an import that happens in
-another system, so the column that would have recorded it was never written. Any
+another system, so the column that would have recorded it was never written. And the
 readiness the sheet *can* compute — `Row check` — is computed from data that exists
-before Attio is opened, and is stale the moment the import runs.
+before Attio is opened, so it is stale the moment the import runs.
 
 So the same batch can be handed off twice. In Attio a Deal has **no unique attribute and
 always creates**, with no undo ([research](docs/research/attio-csv-importer.md)). A
@@ -145,7 +154,7 @@ model in the transform. **The transform does not want one, and the honest result
 mostly negative.** Full reasoning in
 [ADR-0002](docs/adr/0002-a-model-may-only-raise-a-flag.md).
 
-Four plausible jobs for a model, three of them closed by evidence:
+Five plausible jobs for a model. Four are closed by evidence:
 
 - **Normalising the domain** — deterministic. Four characters of regex beat a model that
   cannot be replayed.
@@ -176,7 +185,7 @@ A missing key never produces a batch that looks clean.
 
 ## What W34 actually produces
 
-Re-derived by `node scripts/derive-w34.mjs` from the batch data:
+Re-derived by `npm run w34:derive` from the batch data:
 
 | | candidates | exported | held |
 | --- | --- | --- | --- |
@@ -184,17 +193,21 @@ Re-derived by `node scripts/derive-w34.mjs` from the batch data:
 | Person | 8 | 7 | 1 |
 | Deal | 7 | 6 | 1 |
 
-The bundle is `1-companies.csv` (1 row), `2-people.csv` (7 rows), `3-deals.csv` (6 rows)
-and an inert `handoff-notes.md`. On confirmation, **7 of the 8 source rows** are marked
-`Imported`.
+All 7 Company candidates are exported, but only one of them needs a row of its own:
+6 reach Attio through the relationship columns of `2-people.csv`, which is why the
+companies file is emitted conditionally rather than always. So the bundle is
+`1-companies.csv` (1 row), `2-people.csv` (7 rows), `3-deals.csv` (6 rows) and an inert
+`handoff-notes.md`. On confirmation, **7 of the 8 source rows** are marked `Imported`.
 
 The held pair is the interesting case. Tern Mobility's contact has no work email, so the
-Person candidate is Held. The Deal is held with it — not because a Stop leaks to
-siblings, but because **only the irreversible object waits**: a Company or a Person sent
-early upserts safely and sending it twice is a no-op, while a Deal with an empty
-participants cell is a record attached to nobody, permanently. The *Company* still ships,
-in `1-companies.csv`, so the account is in Attio the week it was qualified. The source row
-keeps `Ready for CRM` and returns when W34 is re-run
+Person candidate is Held. Its Deal is Held too, on a Stop naming the sibling that caused
+it. That a Stop can come from a sibling is ordinary; what needs the argument is why it
+reaches the Deal and not the Company, and the answer is that **only the irreversible
+object waits**. A Company or a Person sent early upserts safely, and sending it twice is
+a no-op; a Deal with an empty participants cell is a record attached to nobody,
+permanently. So the *Company* still ships, in `1-companies.csv`, and the account is in
+Attio the week it was qualified. The source row keeps `Ready for CRM` and returns when
+W34 is re-run
 ([ADR-0003](docs/adr/0003-a-company-candidate-is-never-dropped-with-its-people.md),
 [ADR-0005](docs/adr/0005-a-deal-is-emitted-only-when-its-account-is-clear.md)).
 
@@ -256,8 +269,8 @@ defends against, trades a real risk for a theoretical one.
 
 **The OAuth token is plaintext at rest.** One row in the SQLite file, single tenant, no
 encryption. In production it is encrypted under a managed key or held in a secrets
-manager. It is stored rather than kept in memory because a Run survives a restart, and a
-Connection that did not would fail at the last step of the flow — the write-back, hours
+manager. It is stored rather than kept in memory because a run survives a restart, and a
+connection that did not would fail at the last step of the flow — the write-back, hours
 later.
 
 **Concurrency is single-process.** The in-process lock and the stage guard both assume one
@@ -265,8 +278,8 @@ Express process; two would each accept a resume. Only the write node's re-query 
 survives that. A real deployment puts the lock in the database.
 
 **There is no authorisation.** A run identifier is a v4 UUID in a URL, and possession of it
-is the entire access-control story. In production a Connection belongs to a user and every
-Run is authorised against its owner, so the identifier stops being a bearer capability.
+is the entire access-control story. In production a connection belongs to a user and every
+run is authorised against its owner, so the identifier stops being a bearer capability.
 This is precisely why the app stays on localhost.
 
 Two smaller ones, for completeness: rate limiting and retry against Notion are out of
@@ -303,12 +316,14 @@ attestation over a signal that cannot be obtained, not an oversight.
 ## Re-deriving every number
 
 ```
-node scripts/derive-w34.mjs     # every count above, from the batch data
-node scripts/check-notion-fixture.mjs
+npm run w34:derive     # every count above, from the batch data
+npm run notion:check   # the fixture the first one reads
 ```
 
-The first runs both workbook formulas over the batch, derives the candidate counts, and
-self-checks the eight headline numbers this write-up states. No token, no network. If a
+The first opens the `.xlsx`, quotes the sheet's own two formulas, runs them over the
+batch beside the pipeline's repair, derives the candidate counts, and self-checks
+fourteen claims this write-up makes — including that the quoted formulas are the
+workbook's byte for byte, and that `Import state` is empty. No token, no network. If a
 number here disagrees with that output, the output is right.
 
 ## State of the build

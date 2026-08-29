@@ -19,6 +19,7 @@
     "notion:setup": "bash scripts/notion-setup-wizard.sh",
     "notion:check": "node scripts/check-notion-fixture.mjs",
     "notion:seed": "node scripts/seed-notion-source-db.mjs",
+    "w34:derive": "node scripts/derive-w34.mjs",
     "attio:setup": "bash scripts/attio-setup-wizard.sh",
     "attio:schema": "node scripts/probe-attio.mjs schema",
     "attio:probes": "node scripts/probe-attio.mjs csv",
