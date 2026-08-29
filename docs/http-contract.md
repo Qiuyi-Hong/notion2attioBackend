@@ -48,6 +48,18 @@ All request and response bodies are JSON, except the file download.
 
 The pending-authorisation row is the one thing in the SQLite file with a lifetime: it expires on use, or after ten minutes.
 
+Both `/auth` routes are browser navigations, so the callback's answer is the URL it lands on: `${FRONTEND_ORIGIN}/runs?connection=<outcome>`. The outcome is a closed list, and it is what the connect banner in [`run-surfaces.md`](./run-surfaces.md) renders — the browser is told which of these happened rather than left to infer it from a generic failure.
+
+| `connection` | What happened |
+| --- | --- |
+| `connected` | The grant is stored and reaches at least one data source. |
+| `no_databases` | The grant is stored, but covers no database we can read. The workspace has a name; there is nothing in it for us. |
+| `cancelled` | The user backed out of consent. Nothing was exchanged and nothing was stored. |
+| `expired` | The `state` was unknown, already spent or over ten minutes old — or the issued token was refused on sight. Nothing was stored. |
+| `failed` | Notion refused the code exchange. |
+
+`DELETE /api/connection` answers `{ disconnected: true, strandedRuns: runId[] }`. A stranded run is one at `awaiting_confirmation`: its bundle is in Attio and, once the grant is gone, its write-back can no longer be made.
+
 ### Batches
 
 | Route | Purpose |
