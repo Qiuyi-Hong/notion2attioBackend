@@ -6,6 +6,8 @@ Glossary for the weekly handoff of qualified accounts from Notion into Attio. Te
 
 One week's worth of qualified accounts, identified by the Notion `Batch` value (e.g. `2026-W34`) and filtered to `CRM status = Ready for CRM`. The unit the reviewer works through, and the unit the files are made from.
 
+A batch is also the unit of retry. Because it is identified by both its `Batch` value and `CRM status = Ready for CRM`, a row held back in review is not reached by the following week — it is reached by running the same batch again, which then returns exactly the rows still waiting.
+
 ## Connection
 
 The permission a person grants that lets the pipeline read a Notion workspace and write back to it. A connection names one workspace, and covers only the pages that person chose to share — never the whole workspace. It is granted once and lasts until that person withdraws it.
@@ -38,6 +40,12 @@ A Company, Person or Deal that the pipeline proposes to create in Attio, derived
 
 One source row contributes to several candidates. Several source rows contribute to one candidate — two rows naming the same company domain produce one Company candidate. Avoid saying "row" when the thing meant is a candidate.
 
+## Account
+
+One Company candidate together with the Person candidates and the Deal candidate derived alongside it. Notion's `Account` column names the same thing at source.
+
+The account, not the source row, is the thing that has to be whole before a Deal is sent. Several source rows can feed one account — Brightyard is one account with two people and one opportunity.
+
 ## Silent repair
 
 A change the pipeline makes to a value without asking anyone. A repair is silent only when it is deterministic, reversible, and asserts nothing new about the world — it reformats a value already given. Every silent repair is written to the repair log; *silent* means it does not need the reviewer's attention, not that it is hidden.
@@ -52,7 +60,9 @@ One problem found on one candidate, or on the batch. A flag exists only if the r
 
 ### Stop
 
-A flag level. The candidate must not be sent until a person clears the flag. A Stop excludes only its own candidate; it never blocks the batch.
+A flag level. The candidate must not be sent until a person clears the flag. A Stop never blocks the batch.
+
+A Stop usually comes from the candidate's own values. It can also come from a sibling in the same account, because a Deal is sent only when every candidate in its account is Clear — so a held Person holds its account's Deal. Such a Stop names the sibling that caused it, and is cleared by completing the account. It is the one flag with no way to force past it: a Deal Attio cannot attach to anyone is a record nobody can undo.
 
 ### Warn
 

@@ -26,6 +26,10 @@ The transform splits a batch into **candidate** Company, Person and Deal records
 
 **Blast radius stops being all-or-nothing.** A Stop on Tern Mobility's Person leaves its Company and Deal untouched, because they are separate candidates. Verified achievable against Attio's docs: the Deals import carries `Associated company domain` and creates the company itself, so a held Person does not orphan its Company.
 
+> **Narrowed twice.** "Achievable" was the wrong test. This paragraph asked whether the Company survived and never asked what the *Deal* became — and the answer is that it is orphaned: `3-deals.csv` links people through `Associated people email addresses`, Amina has none, and empty values are skipped, so the Deal is created attached to nobody.
+>
+> [ADR-0003 (companies)](./0003-a-company-candidate-is-never-dropped-with-its-people.md) settled the Company half: it ships in its own file rather than as a side effect of the people file, so it is never a stub and never dropped. [ADR-0005](./0005-a-deal-is-emitted-only-when-its-account-is-clear.md) settled the Deal half: flags still attach to candidates, but a Deal candidate is emitted only when every candidate in its account is Clear, because a Deal is the one object Attio cannot undo.
+
 **A reviewer surface that is not a spreadsheet.** The reviewer sees candidates, not rows, which forecloses the cheapest possible UI — a table mirroring the source export.
 
 ## Alternatives considered
