@@ -15,7 +15,7 @@
     "lint:fix": "eslint --fix .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test \"test/**/*.test.mjs\"",
     "notion:setup": "bash scripts/notion-setup-wizard.sh",
     "notion:check": "node scripts/check-notion-fixture.mjs",
     "notion:seed": "node scripts/seed-notion-source-db.mjs",

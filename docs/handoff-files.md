@@ -204,5 +204,7 @@ quoted and comma-space separated, exactly as Attio's template shows.
 
 The example files were generated from `data/notion-qualified-accounts-w34.csv`
 and verified: valid UTF-8, no BOM, CRLF only with zero bare LF, and no trailing
-newline, in all three CSVs. They are illustrative output committed as a fixture —
-the emitter that produces them for real is build work, not settled here.
+newline, in all three CSVs. `npm test` asserts those four rules against the
+committed files, so the exhibit cannot drift from the contract unnoticed. They
+are illustrative output committed as a fixture — the emitter that produces them
+for real is build work, not settled here.

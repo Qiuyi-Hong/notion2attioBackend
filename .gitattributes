@@ -1,0 +1,4 @@
+# The committed handoff example is a byte exhibit: UTF-8, no BOM, CRLF, no
+# trailing newline (docs/handoff-files.md, asserted by `npm test`). Git must
+# not normalise its line endings on checkout or commit.
+docs/examples/**/*.csv -text

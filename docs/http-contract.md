@@ -17,7 +17,7 @@ It is a specification, not an implementation. Nothing here is built yet — `src
 1. **The browser holds one value: the run identifier.** Everything else is fetched.
 2. **`GET` never advances a run.** Downloading a file, polling status and reading the connection are all repeatable and side-effect-free.
 3. **The two pauses are two routes, not one.** They carry different payloads and have different consequences.
-4. **An edit re-enters the checks.** The reviewer's changes go back through `check`; editing is never a way to remove a flag.
+4. **An edit is validated, not re-checked.** The reviewer's changes are validated where they land; `check` does not run again, and editing is never a way to remove a flag ([ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md)).
 5. **The vocabulary survives the wire format.** A Connection is not part of a Run's payload, because a Connection does not belong to a Run.
 
 ## Origin and transport
@@ -188,7 +188,7 @@ The resume value arrives straight from a browser. Two kinds of bad input get two
 
 **Semantic — goes back into the graph as a flag.** The reviewer types an email address that still does not parse. The review node re-interrupts and the problem appears on the candidate in the ledger, where the reviewer is already working. A `400` here would be the API correcting the reviewer somewhere other than the surface they are looking at.
 
-The load-bearing half is that **the reviewer's edits re-enter `check`**. If they did not, editing a flagged value would be a way to launder the flag away. What the pipeline *re-derives* on that pass is [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31)'s question, not this contract's.
+The load-bearing half is that **an edit is validated, not re-checked**. [ADR-0004](./adr/0004-the-candidate-set-is-frozen-at-the-check-pass.md) settled [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31) and amends what this contract first said here: validation runs on the edited value, where it lands, and `check` never runs a second pass. Laundering is then structurally impossible rather than defended against — the candidate set and the flag set are frozen the moment `check` completes, so a flag is cleared only by answering it through its own control, never by editing a cell near it.
 
 ## Concurrency
 

@@ -5,7 +5,7 @@
 - **Ticket:** [What happens when the Notion write-back half-fails?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/17)
 - **Builds on:** [ADR-0005](./0005-a-deal-is-emitted-only-when-its-account-is-clear.md), [ADR-0006](./0006-a-repeat-deal-for-a-known-account-is-not-a-duplicate.md)
 
-> **Numbering note.** `main` carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). 0004 was left free for whoever untangles that and then taken by [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31); 0006 is [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13)'s, in flight in [PR #39](https://github.com/Qiuyi-Hong/notion2attioBackend/pull/39). This takes 0007. The 0003 collision is still open.
+> **Numbering note.** `main` carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). 0004 was left free for whoever untangles that and then taken by [#31](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/31); 0006 is [#13](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/13)'s, in flight in [PR #39](https://github.com/Qiuyi-Hong/notion2attioBackend/pull/39). This takes 0007. The 0003 collision was closed by [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48): #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
 ## Context
 

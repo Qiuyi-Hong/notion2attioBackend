@@ -5,7 +5,7 @@
 - **Ticket:** [Can a run be confirmed against a connection that did not read it?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42)
 - **Builds on:** [ADR-0007](./0007-the-write-back-completes-or-is-abandoned.md) — promotes one of its consequences to a rule, and **widens** its precondition on abandoning
 
-> **Numbering note.** `main` still carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). That collision is still open. This takes 0008.
+> **Numbering note.** `main` still carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This takes 0008. That collision was closed by [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48): #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
 ## Context
 
@@ -33,7 +33,7 @@ So the refusal is justified by what it *tells the Reviewer*, not by a write it p
 
 **1. The identity is the `workspace_id`.** Notion's token response ([#14](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/14) recorded it live) carries `workspace_id`, `bot_id` and the granted pages. Only `workspace_id` survives the ordinary recovery path: a `401`, then the Reviewer connects again to the *same* workspace. Every re-authorisation mints a new grant, so a `bot_id` key would refuse precisely the case the guard exists to permit. The `data_source_id` is tighter still and would convert ADR-0007's *"a same-workspace reconnect with a narrower page selection degrades into the ordinary per-row failure path"* into a hard refusal.
 
-**2. The fact lives in graph state, written by the node that reads the batch.** Not in the `runs` table: [ADR-0003](./0003-the-server-keeps-its-own-record-of-runs.md) does not forbid it — `workspace_id` is emphatically *not* derivable, since each authorisation overwrites the Connection — but the write node reads graph state, so putting it there means the guard needs no join, and it inherits [ADR-0004](./0004-the-candidate-set-is-frozen-at-the-check-pass.md)'s freeze for free.
+**2. The fact lives in graph state, written by the node that reads the batch.** Not in the `runs` table: [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md) does not forbid it — `workspace_id` is emphatically *not* derivable, since each authorisation overwrites the Connection — but the write node reads graph state, so putting it there means the guard needs no join, and it inherits [ADR-0004](./0004-the-candidate-set-is-frozen-at-the-check-pass.md)'s freeze for free.
 
 **When** matters as much as where. `POST /api/runs` returns `202` and the graph runs afterwards, so the Connection can change between the two moments. The truthful value is the workspace that *actually served the batch query*, recorded by the node that made it — not one stamped at run creation.
 
@@ -59,7 +59,7 @@ This widens the precondition without touching the meaning. Abandon still says *"
 
 **The message names both workspaces** — *"This run read **Carpe Lab**. You are connected to **Demo Space**."* — which is what turns a refusal into an instruction. The cost is a stored name that a rename in Notion can make stale. Accepted: the id keeps the comparison correct, and a stale name in a message is a smaller failure than an unnamed workspace the Reviewer must guess at.
 
-**One more field in graph state, one more code on the closed list, one more field on the snapshot.** The `runs` table is untouched, so ADR-0003 stands exactly as written.
+**One more field in graph state, one more code on the closed list, one more field on the snapshot.** The `runs` table is untouched, so ADR-0009 stands exactly as written.
 
 **The demo is the case this was built for, and it now survives being re-recorded.** Disconnect exists partly so [#15](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/15) can re-record from clean; a take that reconnects to a re-seeded workspace mid-run now meets a sentence rather than eight failures.
 
@@ -75,7 +75,7 @@ This widens the precondition without touching the meaning. Abandon still says *"
 
 **Record the workspace at run creation.** Simpler — one write, in the route handler, before the graph starts. Rejected because `POST /api/runs` is a `202` and the graph runs afterwards, so the value could name a Connection that never served the query.
 
-**Put the fact in the `runs` table.** Legitimate under ADR-0003, since the value is not derivable, and it would let `GET /api/runs` answer without opening a checkpoint. Rejected because the enforcer is the write node, which reads graph state; the table version needs a join to do what the state version does for free.
+**Put the fact in the `runs` table.** Legitimate under ADR-0009, since the value is not derivable, and it would let `GET /api/runs` answer without opening a checkpoint. Rejected because the enforcer is the write node, which reads graph state; the table version needs a join to do what the state version does for free.
 
 **Let the browser compare.** Expose the Run's `workspace_id` on the snapshot and the live one on `GET /api/connection`, and diff them client-side. Rejected on two counts: it puts the rule in two places that can disagree, and the route holds the true copy because the route enforces it.
 
