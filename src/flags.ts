@@ -29,9 +29,11 @@ import type {
  * the `rule`, so no prose travels on the wire — which is also what keeps a
  * model, when one arrives, unable to narrate (ADR-0002).
  *
- * `sibling` names the candidate that *caused* the flag where that is not the
+ * `siblings` names the candidates that *caused* the flag where that is not the
  * candidate carrying it, by id rather than by name: a person's name lives on
- * their own candidate and is never copied (ADR-0004).
+ * their own candidate and is never copied (ADR-0004). It is a list because one
+ * flag is one *problem* — an account two People leave incomplete is still the
+ * one problem *this account is not whole*, cleared by completing it.
  */
 export const Flag = z.object({
   id: z.string(),
@@ -39,9 +41,13 @@ export const Flag = z.object({
   level: z.enum(["stop", "warn"]),
   /** A Warn is a decision or a notice. A Stop is neither. */
   kind: z.enum(["decision", "notice"]).nullable(),
-  /** Whether the reviewer may force past it. D1 is the one Stop that cannot. */
+  /**
+   * Whether the reviewer may force past it — a question only a Stop asks,
+   * since a Warn excludes nothing and so has nothing to force past. It is
+   * `false` on every Warn, and on D1, the one Stop that can never be forced.
+   */
   override: z.boolean(),
-  sibling: z.string().nullable(),
+  siblings: z.array(z.string()),
 });
 export type Flag = z.infer<typeof Flag>;
 
@@ -49,24 +55,30 @@ export type Flag = z.infer<typeof Flag>;
  * A flag that sits on the batch rather than on a candidate — asked once, in
  * one place, before the files are made.
  *
- * P1 carries `stage` because no Notion column holds it and we never read
- * Attio, so the proposal has to come from configuration (#18). It carries no
- * owner: Notion's `Owner` is already on every Deal candidate, and a value
- * lives in exactly one place. Any count the surface shows beside it — *six
- * deals to `Maya`* — is derived from those candidates as they stand, which is
- * why no count is stored here.
+ * `P1+P2` is #6's two batch rules — `Deal owner` and `Deal stage` — merged by
+ * #18 into the single question the reviewer answers once. The name says both
+ * halves are asked here, because the payload alone would not: it carries
+ * `stage` and no owner.
+ *
+ * That asymmetry is the two values' provenance, not an omission. `Deal stage`
+ * has no Notion column, so its proposal comes from configuration
+ * (`config.dealStage`). `Deal owner` does have one, and it is already on every
+ * Deal candidate — copying it here would put a value in two places (ADR-0004).
+ * Any count the surface shows beside the flag — *six deals to `Maya`* — is
+ * likewise derived from those candidates as they stand, which is why no count
+ * is stored here either.
  */
 export const BatchFlag = z.object({
   id: z.string(),
-  rule: z.literal("P1"),
+  rule: z.literal("P1+P2"),
   level: z.literal("warn"),
   kind: z.literal("decision"),
   stage: z.string(),
 });
 export type BatchFlag = z.infer<typeof BatchFlag>;
 
-/** The candidate arrays, each candidate now carrying the flags it earned. */
-export interface Checked {
+/** The ledger once checked: every candidate carrying the flags it earned. */
+export interface CheckedLedger {
   companies: CompanyCandidate[];
   people: PersonCandidate[];
   deals: DealCandidate[];
@@ -86,15 +98,24 @@ export interface Checked {
  * - **D1** — a Deal whose account is not whole. Only the irreversible object
  *   waits (ADR-0005): a Company and a Person upsert safely and lose nothing by
  *   going early, while a Deal attached to nobody is a record no one can undo.
- *   This Stop names the sibling that caused it and offers **no** override; it
- *   is cleared by completing the account.
+ *   One Stop, naming every sibling that caused it, offering **no** override;
+ *   it is cleared by completing the account.
+ *
+ * D1 reads *not Clear or answered* exactly as ADR-0005 writes it, so an
+ * unanswered **Warn** on a sibling holds the Deal as surely as a Stop does.
+ * That is inert today — no deterministic rule raises a Warn on a Person or a
+ * Company — but the screener's N1 and N2 will, and Heliograph's and Lattice
+ * Forge's Deals would then wait on a notice nobody has ticked yet. Whether a
+ * notice should hold a Deal at all is a question for the ticket that brings
+ * the screener; the batch cannot export with an unanswered Warn regardless, so
+ * nothing reaches Attio either way.
  *
  * The rules the settled set also holds — B2, W2, W3, and the Stop on a Deal
  * whose `Owner` is empty — are not built. No W34 row reaches any of them, so
  * each would be a rule with nothing to answer for it.
  * ponytail: add one the week a batch first contains it.
  */
-export function checkFlags(ledger: Ledger, stage: string): Checked {
+export function checkFlags(ledger: Ledger, stage: string): CheckedLedger {
   const people = ledger.people.map((person) => ({
     ...person,
     flags: person.email.trim()
@@ -106,7 +127,7 @@ export function checkFlags(ledger: Ledger, stage: string): Checked {
             level: "stop" as const,
             kind: null,
             override: true,
-            sibling: null,
+            siblings: [],
           },
         ],
   }));
@@ -129,25 +150,30 @@ export function checkFlags(ledger: Ledger, stage: string): Checked {
         level: "warn",
         kind: "decision",
         override: false,
-        sibling: null,
+        siblings: [],
       });
     }
 
-    // Its own W1 is not a reason to hold it — the reviewer answering that flag
-    // is the whole point of the review. A *sibling* the reviewer has yet to
-    // deal with is.
+    // Every other candidate in the account. The Company is in that set even
+    // though nothing flags one today, because ADR-0005 waits on *every*
+    // candidate in the account and B2 would otherwise slip past. The Deal's
+    // own W1 is not in it: the reviewer answering that flag is the whole point
+    // of the review, and a flag cannot be its own reason to wait.
     const siblings = [
       ...peopleOn(deal.companyId),
       ...companies.filter((company) => company.id === deal.companyId),
-    ];
-    for (const sibling of siblings.filter((one) => one.flags.length > 0)) {
+    ].filter((sibling) => sibling.flags.length > 0);
+
+    // One Stop, however many siblings: the problem is *this account is not
+    // whole*, and it is cleared once, by completing it.
+    if (siblings.length > 0) {
       flags.push({
-        id: `D1:${deal.id}:${sibling.id}`,
+        id: `D1:${deal.id}`,
         rule: "D1",
         level: "stop",
         kind: null,
         override: false,
-        sibling: sibling.id,
+        siblings: siblings.map((sibling) => sibling.id),
       });
     }
 
@@ -160,8 +186,8 @@ export function checkFlags(ledger: Ledger, stage: string): Checked {
     deals,
     batchFlags: [
       {
-        id: "batch:deal-defaults",
-        rule: "P1",
+        id: "P1+P2:batch",
+        rule: "P1+P2",
         level: "warn",
         kind: "decision",
         stage,

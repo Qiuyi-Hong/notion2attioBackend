@@ -55,7 +55,8 @@ const rowsFor = (account) => rows.filter((row) => row.Account === account);
 /** B1: a Person with no work email can never be matched in Attio again. */
 const missingEmail = rows.filter((row) => !row["Work email"].trim());
 
-/** The accounts B1 leaves incomplete — one D1 Stop on each account's Deal. */
+/** The accounts B1 leaves incomplete — one D1 Stop on each account's Deal,
+ *  however many of its siblings are the reason. */
 const incompleteAccounts = new Set(missingEmail.map((row) => row.Account));
 
 /** W1: an account on more than one row is one opportunity, not several. */
@@ -227,7 +228,7 @@ test("an account on two rows asks once whether it is one opportunity", async () 
           level: "warn",
           kind: "decision",
           override: false,
-          sibling: null,
+          siblings: [],
         },
       ],
       "one decision Warn, not one per source row",
@@ -241,23 +242,25 @@ test("a Deal whose sibling is unanswered is Stopped, and names the sibling", asy
   const { candidates } = await reviewSnapshot();
 
   for (const account of incompleteAccounts) {
-    const held = candidates.people.find(
+    const unanswered = candidates.people.filter(
       (person) =>
         rowsFor(account).some((row) => row["Source ID"] === person.sourceId) &&
         person.flags.length > 0,
     );
     const deal = candidates.deals.find(
-      (candidate) => candidate.companyId === held.companyId,
+      (candidate) => candidate.companyId === unanswered[0].companyId,
     );
     const stops = deal.flags.filter((flag) => flag.level === "stop");
 
-    assert.equal(stops.length, 1, `${account}'s Deal waits`);
+    // One flag is one problem — *this account is not whole* — however many
+    // siblings are the reason for it.
+    assert.equal(stops.length, 1, `${account}'s Deal waits, once`);
     assert.equal(stops[0].rule, "D1");
-    // By id, not by name: the person's name lives on their own candidate.
-    assert.equal(
-      stops[0].sibling,
-      held.id,
-      "it names the sibling that caused it",
+    // By id, not by name: a person's name lives on their own candidate.
+    assert.deepEqual(
+      stops[0].siblings.sort(),
+      unanswered.map((person) => person.id).sort(),
+      "it names every sibling that caused it",
     );
     // Only the irreversible object waits, and it cannot be forced past.
     assert.equal(stops[0].override, false);
@@ -306,15 +309,19 @@ test("a flag attaches to a candidate, and has nowhere to name a source row", asy
       "every flag sits on a candidate that exists",
     );
     assert.equal(flag.sourceId, undefined, "and names no source row");
-    for (const value of Object.values(flag)) {
+    for (const value of Object.values(flag).flat()) {
       assert.ok(
         !sourceIds.has(value),
         `${flag.id} carries the source row ${value}`,
       );
     }
     // A Stop is neither a decision nor a notice; a Warn is one of the two.
+    // And a Warn excludes nothing, so it has nothing to force past.
     if (flag.level === "stop") assert.equal(flag.kind, null);
-    else assert.ok(["decision", "notice"].includes(flag.kind));
+    else {
+      assert.ok(["decision", "notice"].includes(flag.kind));
+      assert.equal(flag.override, false, `${flag.id} is a Warn`);
+    }
   }
 
   // The snapshot has no candidate flags of its own: `batchFlags` is the only
@@ -330,7 +337,8 @@ test("deal owner and stage are asked once for the batch, not once per deal", asy
   assert.equal(batchFlags.length, 1, "one flag, however many deals");
   assert.ok(candidates.deals.length > 1, "there are deals it covers");
   const [flag] = batchFlags;
-  assert.equal(flag.rule, "P1");
+  // #6's two batch rules, merged by #18 into one question asked once.
+  assert.equal(flag.rule, "P1+P2");
   assert.equal(flag.level, "warn");
   assert.equal(flag.kind, "decision", "the answer changes the files");
 
