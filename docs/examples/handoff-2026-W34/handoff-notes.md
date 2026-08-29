@@ -8,7 +8,7 @@ repair log and the flag record otherwise live only on the review screen and
 vanish with the tab.
 
 Generated 2026-08-29. Run `2026-W34` · 8 source rows · 7 companies · 7 people
-· 7 deals · 1 held.
+· 6 deals · 2 held.
 
 ---
 
@@ -18,16 +18,25 @@ Generated 2026-08-29. Run `2026-W34` · 8 source rows · 7 companies · 7 people
 | ------------------ | ------------------ | ---- |
 | `1-companies.csv`  | Companies          | 1    |
 | `2-people.csv`     | People             | 7    |
-| `3-deals.csv`      | Deals              | 7    |
+| `3-deals.csv`      | Deals              | 6    |
 
-Import in that order. People must land before Deals; the lone Company must land
-before either, because it has no person row to carry it in.
+Import in that order. People must land before Deals. The lone Company carries no
+person row and no deal row, so it can land at any point; it goes first to keep
+the numbering honest.
 
 **Held, not handed off:**
 
-- **Tern Mobility — Amina Yusuf** (`QL-260819-003`). No work email. The person
-  stays in Notion at `Ready for CRM` and returns in a later batch. The *company*
-  and its deal were still sent, via `1-companies.csv`.
+- **Tern Mobility — Amina Yusuf** (`QL-260819-003`). No work email, so the Person
+  candidate is Held.
+- **Tern Mobility — deal**. Held by a Stop raised by the sibling above: a Deal
+  candidate is emitted only when every candidate in its account is Clear or
+  answered ([#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29)).
+  Shipping it with an empty participants cell would have created a deal attached
+  to nobody, permanently and with no undo.
+
+The *company* was still sent, via `1-companies.csv` — Attio matches Companies on
+`Domains`, so it is safe now and a no-op when the row returns. The source row
+stays at `Ready for CRM` and comes back when batch `2026-W34` is re-run.
 
 ---
 
@@ -97,10 +106,12 @@ rather than cosmetic — Attio matches companies on `Domains`, so an unrepaired
 
 ## 4. Flags and how they were answered
 
-**Stop — 1**
+**Stop — 2**
 
 - **Tern Mobility — Amina Yusuf**: no work email. Person candidate held. Not
   overridable; a person record with no email cannot be matched on re-import.
+- **Tern Mobility — deal**: raised by the sibling above, not by the Deal
+  candidate's own values. Cleared by completing the account, and by nothing else.
 
 **Decision warn — 1**
 
@@ -122,8 +133,12 @@ rather than cosmetic — Attio matches companies on `Domains`, so an unrepaired
 
 **Batch flag — 1**
 
-- **Deal owner and deal stage**: 7 deals → owner `Maya`, stage `Lead`. Owner read
-  per deal from Notion's `Owner` column; stage configured for the batch.
+- **Deal owner and deal stage**: 6 deals → owner `Maya`, stage `Lead`. Owner read
+  per deal from Notion's `Owner` column; stage configured for the batch. The
+  count is a derived value — it read `6` at export because the Tern Mobility deal
+  was Held, and would have read `7` had the reviewer supplied Amina's work email
+  first. The answer covers the batch, not the six deals it happened to name
+  ([#40](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/40)).
   ⚠️ `Lead` is taken from Attio's published template, not from a live workspace.
   Confirm the real stage labels before the first real import.
 
@@ -139,5 +154,6 @@ rather than cosmetic — Attio matches companies on `Domains`, so an unrepaired
 ## 5. After importing
 
 Return to the app and confirm the batch landed. Only then does the run set
-`CRM status` = `Imported` in Notion, and only on the 7 rows above. Tern
+`CRM status` = `Imported` in Notion, and only on the 7 source rows whose every
+candidate landed — `Imported` means finished, not partly finished. Tern
 Mobility's row keeps `Ready for CRM`.
