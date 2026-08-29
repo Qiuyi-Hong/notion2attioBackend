@@ -152,9 +152,9 @@ const review: GraphNode<typeof State> = (state) =>
 /**
  * The files, made once (#56). Pure, and the whole of it lives in `emit.ts`.
  *
- * It runs **after** the review rather than at the download, so the bytes the
- * reviewer approved are the bytes they carry: a `GET` free to regenerate them
- * would be free to disagree with the ledger that was on screen.
+ * It runs here, after the review, rather than at the download: a `GET` free to
+ * regenerate them would be free to disagree with the ledger that was on
+ * screen.
  */
 const emit: GraphNode<typeof State> = (state) => ({
   files: bundleFiles(state),
@@ -202,11 +202,10 @@ export const graph = new StateGraph(State)
    * as a `400` on a response they will never see again. The ledger this leaves
    * behind is the reviewer's own work, so nothing they got right is lost.
    *
-   * And back to it while any **Warn** is unanswered: the batch refuses to
-   * export until every one is answered (`CONTEXT.md`, *Handoff bundle*). That
-   * refusal is the run staying where it is, not an error — the unanswered flag
-   * is already on screen in the ledger, which is the only place its answer can
-   * be given.
+   * And back to it while any **Warn** is unanswered — the export gate, whose
+   * reading lives on `unansweredWarn`. The refusal is the run staying where it
+   * is, not an error: the unanswered flag is already on screen in the ledger,
+   * which is the only place its answer can be given.
    */
   .addConditionalEdges(
     "review",

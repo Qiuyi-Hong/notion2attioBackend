@@ -101,18 +101,10 @@ router.post("/:runId/review", async (req, res) => {
 });
 
 /**
- * One file of the handoff bundle (#56).
- *
- * Serves the **stored bytes from the checkpoint**, and never regenerates them:
- * the bytes downloaded are provably the bytes the reviewer approved. It is a
- * repeatable `GET` — downloading twice returns the same bytes and moves the
- * run nowhere, which is why the run reaches `awaiting_confirmation` when the
- * files *exist* rather than when they are fetched.
- *
- * The content type is read off the filename rather than stored beside it. The
- * import files are CSVs; `handoff-notes.md` is Markdown precisely so that
- * neither an auto-mapper nor a tired human offers it to Attio's import screen,
- * and serving it as `text/csv` would undo that in one header.
+ * Read off the filename rather than stored beside it. `handoff-notes.md` is
+ * Markdown precisely so that neither an auto-mapper nor a tired human offers
+ * it to Attio's import screen, and serving it as `text/csv` would undo that in
+ * one header.
  */
 const CONTENT_TYPES: Record<string, string> = {
   csv: "text/csv; charset=utf-8",
@@ -120,6 +112,19 @@ const CONTENT_TYPES: Record<string, string> = {
   zip: "application/zip",
 };
 
+/**
+ * One file of the handoff bundle (#56).
+ *
+ * Serves the stored bytes from the checkpoint and never regenerates them, so
+ * the bytes downloaded are provably the bytes the reviewer approved. It is a
+ * repeatable `GET`: downloading twice returns the same bytes and moves the run
+ * nowhere, which is why the run reaches `awaiting_confirmation` when the files
+ * *exist* rather than when they are fetched.
+ *
+ * The file set is the emitter's — the ZIP the reviewer carries, and each of
+ * its members, so a reviewer who wants one file can take one. `fileId` is
+ * opaque, so that set can change without touching the contract.
+ */
 router.get("/:runId/files/:fileId", async (req, res) => {
   const run = requireRun(req.params.runId);
   const file = await fileFrom(run.runId, req.params.fileId);

@@ -94,13 +94,40 @@ const dealName = (company: string) => `${company} — New business`;
  * reviewer answered — the proposal `config.dealStage` made, or the value they
  * replaced it with. Read from the flag rather than from configuration, so a
  * changed answer cannot be silently ignored by the emitter.
+ *
+ * A missing flag **throws** rather than defaulting. `check` raises `P1+P2` on
+ * every batch, so its absence is a broken invariant, not a state; and the one
+ * thing that must not happen is six Deals reaching Attio under a blank stage,
+ * on records that always create and can never be undone. A run that throws
+ * here stops at a checkpoint the Reviewer can resume from.
  */
-const stageOf = (batchFlags: BatchFlag[]): string =>
-  batchFlags.find((flag) => flag.rule === "P1+P2")?.stage ?? "";
+const stageOf = (batchFlags: BatchFlag[]): string => {
+  const flag = batchFlags.find((one) => one.rule === "P1+P2");
+  if (!flag) throw new Error("The batch flag is missing; no Deal stage.");
+  return flag.stage;
+};
 
 /** What the bundle carries: every Clear and answered candidate, and no Held one. */
 const sent = <T extends { held: boolean }>(candidates: T[]): T[] =>
   candidates.filter((candidate) => !candidate.held);
+
+/**
+ * Everything the files are made from: the ledger once reviewed, plus the three
+ * things the notes file needs that no candidate carries — the batch it belongs
+ * to, the rows it was read from, and what was repaired on the way.
+ */
+export type Emittable = CheckedLedger & {
+  batch: string;
+  sourceRows: SourceRow[];
+  repairs: Repair[];
+};
+
+/** Every candidate in the ledger, whichever object it becomes. */
+const candidatesIn = (ledger: CheckedLedger) => [
+  ...ledger.companies,
+  ...ledger.people,
+  ...ledger.deals,
+];
 
 /**
  * The three import files, plus the one that is deliberately not an import file.
@@ -111,15 +138,7 @@ const sent = <T extends { held: boolean }>(candidates: T[]): T[] =>
  * missing file and a file with no rows say different things, and only the
  * first is a bug worth noticing.
  */
-export function bundleFiles(state: {
-  batch: string;
-  sourceRows: SourceRow[];
-  companies: CompanyCandidate[];
-  people: PersonCandidate[];
-  deals: DealCandidate[];
-  repairs: Repair[];
-  batchFlags: BatchFlag[];
-}): HandoffFile[] {
+export function bundleFiles(state: Emittable): HandoffFile[] {
   const companies = sent(state.companies);
   const people = sent(state.people);
   const deals = sent(state.deals);
@@ -137,15 +156,15 @@ export function bundleFiles(state: {
    * because a company with an exported person already reaches Attio through
    * that person's row.
    */
-  const orphaned = companies.filter(
+  const withNoExportedPerson = companies.filter(
     (company) => peopleOn(company.id).length === 0,
   );
-  if (orphaned.length > 0) {
+  if (withNoExportedPerson.length > 0) {
     members.push({
       filename: "1-companies.csv",
       bytes: csv(
         ["Name", "Domains", "Primary location", "Segment"],
-        orphaned.map((company) => [
+        withNoExportedPerson.map((company) => [
           company.name,
           company.domain,
           company.primaryLocation,
@@ -212,9 +231,15 @@ export function bundleFiles(state: {
     ),
   });
 
+  // Written last, and handed the import files it is about: the row counts a
+  // reviewer reconciles against Attio's import screen are read off the bytes
+  // that will actually be in the ZIP, never counted a second way.
   members.push({
     filename: "handoff-notes.md",
-    bytes: Buffer.from(notes(state, { companies, people, deals }), "utf8"),
+    bytes: Buffer.from(
+      notes(state, { companies, people, deals }, members),
+      "utf8",
+    ),
   });
 
   /**
@@ -239,12 +264,13 @@ export function bundleFiles(state: {
  * take, the repair log, and every flag with its answer.
  */
 function notes(
-  state: Parameters<typeof bundleFiles>[0],
+  state: Emittable,
   bundle: {
     companies: CompanyCandidate[];
     people: PersonCandidate[];
     deals: DealCandidate[];
   },
+  importFiles: { filename: string; bytes: Buffer }[],
 ): string {
   const companyOf = new Map(state.companies.map((one) => [one.id, one]));
   const exported = new Set(bundle.people.map((person) => person.id));
@@ -267,12 +293,33 @@ function notes(
     "travel — and because the repair log and the flag record otherwise live only",
     "on the review screen and vanish with the tab.",
     "",
-    `${state.sourceRows.length} source rows · ${bundle.companies.length} companies` +
-      ` · ${bundle.people.length} people · ${bundle.deals.length} deals`,
+    `Run \`${state.batch}\` · ${state.sourceRows.length} source rows.`,
     "",
     "---",
     "",
-    "## 1. Research notes to paste by hand",
+    "## 1. What was handed off",
+    "",
+    "| file | rows |",
+    "| --- | --- |",
+    // The candidate counts are deliberately not repeated here. A Company
+    // reaches Attio through a person row as often as through a file, so
+    // *seven companies* beside a one-row companies file is two numbers a
+    // reviewer would try to reconcile and could not. What they can check
+    // against Attio's import screen is a row count per file, so that is what
+    // this says.
+    ...importFiles.map(
+      // Rows, not lines: the header is not a row, and there is no trailing
+      // newline, so one CRLF is one row.
+      (member) =>
+        `| \`${member.filename}\` | ${[...member.bytes].filter((byte) => byte === 0x0d).length} |`,
+    ),
+    "",
+    "Import in that order. People must land before Deals, because a deal can",
+    "only attach to a company that already exists.",
+    "",
+    "---",
+    "",
+    "## 2. Research notes to paste by hand",
     "",
     "Attio takes these only through the UI. Open each person — or the company,",
     "where the person was held — and paste.",
@@ -294,7 +341,7 @@ function notes(
   lines.push(
     "---",
     "",
-    "## 2. Repair log",
+    "## 3. Repair log",
     "",
     "Every silent repair the run made. Silent means the reviewer did not have to",
     "approve it — not that it was hidden. One entry per source row repaired, so a",
@@ -314,7 +361,7 @@ function notes(
     "",
     "---",
     "",
-    "## 3. Flags and how they were answered",
+    "## 4. Flags and how they were answered",
     "",
     "| flag | on | level | answer |",
     "| --- | --- | --- | --- |",
@@ -327,17 +374,40 @@ function notes(
         ? "answered"
         : "not answered";
 
+  /**
+   * Two answers carry a value, and both are written out: `B1`'s work email —
+   * which is now the Person's own, so it is read from where it lives rather
+   * than from a copy — and the batch flag's `Deal stage`.
+   *
+   * Every other answer is `true`, which `docs/http-contract.md` defines as
+   * *answered, with nothing to supply*: a Warn read, or a decision taken. For
+   * those the word is genuinely the whole of the answer, and the row it
+   * changed is in the files beside this.
+   */
+  const answerOn = (
+    candidate: CompanyCandidate | PersonCandidate | DealCandidate,
+    flag: Flag,
+  ) => {
+    // `D1` is the one flag nothing answers: it has no control and is cleared
+    // by its account becoming whole (ADR-0005). Reading "not answered" against
+    // it would name the Reviewer for something they were never offered.
+    if (flag.rule === "D1") {
+      return flag.cleared
+        ? "cleared — the account is whole"
+        : "not cleared — the account is not whole";
+    }
+    return flag.rule === "B1" && flag.cleared && "email" in candidate
+      ? `${answer(flag)} — work email \`${candidate.email}\``
+      : answer(flag);
+  };
+
   // Every flag in the batch, on a held candidate as much as on an exported
   // one: a Stop that removed a row from the files is exactly the record this
   // file exists to keep.
-  for (const candidate of [
-    ...state.companies,
-    ...state.people,
-    ...state.deals,
-  ]) {
+  for (const candidate of candidatesIn(state)) {
     for (const flag of candidate.flags) {
       lines.push(
-        `| ${flag.rule} | ${named.get(candidate.id) ?? ""} | ${flag.level} | ${answer(flag)} |`,
+        `| ${flag.rule} | ${named.get(candidate.id) ?? ""} | ${flag.level} | ${answerOn(candidate, flag)} |`,
       );
     }
   }
@@ -353,12 +423,8 @@ function notes(
    * Held candidates are named, not merely absent. A row that left the batch
    * without a line saying so is the failure this file exists to prevent.
    */
-  const held = [
-    ...state.companies.filter((one) => one.held),
-    ...state.people.filter((one) => one.held),
-    ...state.deals.filter((one) => one.held),
-  ];
-  lines.push("", "---", "", "## 4. Held, not handed off", "");
+  const held = candidatesIn(state).filter((candidate) => candidate.held);
+  lines.push("", "---", "", "## 5. Held, not handed off", "");
   if (held.length === 0) {
     lines.push(
       "Nothing was held. Every candidate in the batch was handed off.",
@@ -378,13 +444,13 @@ function notes(
     "",
     "---",
     "",
-    "## 5. After importing",
+    "## 6. After importing",
     "",
-    "Import `1-companies.csv` (when present), then `2-people.csv`, then",
-    "`3-deals.csv` — the numbers are the order, because a deal can only attach to",
-    "a company that already exists. Then return to the app and confirm the batch",
-    "landed. Only then does the run set `CRM status` = `Imported` in Notion, and",
-    "only on the source rows whose every candidate landed.",
+    "Return to the app and confirm the batch landed. Only then does the run set",
+    "`CRM status` = `Imported` in Notion, and only on the source rows whose",
+    "**every** candidate landed — `Imported` means finished, not partly",
+    "finished. A held row keeps `Ready for CRM` and comes back when the batch is",
+    "re-run.",
     "",
   );
 
@@ -480,8 +546,6 @@ function zip(members: { filename: string; bytes: Buffer }[]): Buffer {
  */
 export const unansweredWarn = (ledger: CheckedLedger): boolean =>
   [
-    ...ledger.companies.flatMap((one) => one.flags),
-    ...ledger.people.flatMap((one) => one.flags),
-    ...ledger.deals.flatMap((one) => one.flags),
+    ...candidatesIn(ledger).flatMap((candidate) => candidate.flags),
     ...ledger.batchFlags,
   ].some((flag) => flag.level === "warn" && !flag.cleared);

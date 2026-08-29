@@ -148,12 +148,8 @@ export async function snapshotOf(run: RunRecord) {
 }
 
 /**
- * One file of the handoff bundle, as the checkpoint stored it.
- *
- * The download **serves these bytes and never regenerates them**, so what is
- * imported is provably what was reviewed — and downloading twice costs
- * nothing, because nothing is made. It is a plain read: no lock, no stage
- * guard, and no effect on the run.
+ * One file of the handoff bundle, as the checkpoint stored it. A plain read:
+ * no lock, no stage guard, and no effect on the run.
  */
 export async function fileFrom(
   runId: string,

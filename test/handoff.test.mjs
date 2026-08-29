@@ -504,4 +504,51 @@ test("the notes file is Markdown carrying the prose, the repair log and every fl
   }
   assert.match(notes, /answered/);
   assert.match(notes, /not answered/);
+
+  // The `Deal stage` the batch flag's answer settled — an answer that carries
+  // a value, written out rather than reduced to the word "answered".
+  const batchFlag = run.batchFlags.find((flag) => flag.rule === "P1+P2");
+  assert.ok(notes.includes(batchFlag.stage));
+
+  // What was held is named, not merely absent from the files.
+  const heldPerson = run.candidates.people.find((person) => person.held);
+  assert.ok(
+    notes.includes(heldPerson.name),
+    "the held candidate is not named in the notes",
+  );
+
+  // The row counts a reviewer reconciles against Attio's import screen, read
+  // off the files themselves.
+  for (const name of IMPORT_FILES) {
+    const rows = rowCount(await bytesOf(run, name));
+    assert.ok(
+      notes.includes(`\`${name}\` | ${rows}`),
+      `${name}'s row count is missing or wrong in the notes`,
+    );
+  }
+});
+
+test("an answer that carried a value is written out, not reduced to 'answered'", async () => {
+  const ledger = await paused();
+  const held = ledger.candidates.people.find((person) =>
+    person.flags.some((flag) => flag.rule === "B1"),
+  );
+  const stop = held.flags.find((flag) => flag.rule === "B1");
+  const supplied = "amina.yusuf@tern.example.com";
+
+  const run = {
+    runId: ledger.runId,
+    ...(await review(ledger.runId, {
+      answers: { ...answerEveryWarn(ledger), [stop.id]: { email: supplied } },
+    })),
+  };
+
+  const notes = (await bytesOf(run, "handoff-notes.md")).toString("utf8");
+
+  // `B1`'s answer is the work email the reviewer typed. Recording only that it
+  // was answered would lose the one thing they supplied.
+  assert.ok(
+    notes.includes(supplied),
+    "the work email the reviewer supplied is not in the notes",
+  );
 });

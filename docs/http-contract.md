@@ -99,7 +99,7 @@ A stored Connection answering `not_connected` is not a new contortion: [#49](htt
 | `POST /api/runs/:runId/review` | The reviewer's decision document. |
 | `POST /api/runs/:runId/confirm` | The human attestation that the batch landed in Attio — and, on a retry, the attestation that the write-back is being abandoned. |
 | `POST /api/runs/:runId/continue` | Restarts a stopped run — `stalled`, or `failed` in the process that saw it throw — from its last checkpoint. |
-| `GET /api/runs/:runId/files/:fileId` | The CSV bytes, from the checkpoint. |
+| `GET /api/runs/:runId/files/:fileId` | One file of the handoff bundle, from the checkpoint. |
 | `DELETE /api/runs/:runId` | Cancels the run and releases its batch. After the files exist, this is an attestation — see below. |
 
 `POST /api/runs` returns `202` rather than blocking, because the run reads Notion and then makes up to eight model calls ([#9](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/9)) before it first pauses — plausibly 20–40 seconds. Returning the identifier immediately means the run's URL is shareable before the work finishes, and a reload during startup cannot orphan a run.
@@ -275,9 +275,23 @@ Full reasoning: [ADR-0007](./adr/0007-the-write-back-completes-or-is-abandoned.m
 
 ### File download — `GET /api/runs/:runId/files/:fileId`
 
-Serves the **stored bytes from the checkpoint**. It never regenerates the file, so the bytes downloaded are provably the bytes the reviewer approved.
+Serves the **stored bytes from the checkpoint**. It never regenerates the file, so the bytes downloaded are provably the bytes the reviewer approved. It is a repeatable `GET`: downloading twice returns identical bytes and moves the run nowhere.
 
-`Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment`. The bytes themselves are [#12](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/12)'s: UTF-8, no BOM, **CRLF**, comma, RFC-4180 quoting, no trailing newline.
+`Content-Disposition: attachment`, always — a bundle read in a browser tab is a bundle that never reached the folder the reviewer imports from.
+
+The **content type is per file**, read off its name. The bundle is one ZIP named for the batch ([#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)), and `files` lists it alongside each of its members, so a reviewer who wants one file can take one:
+
+| filename | `Content-Type` |
+| --- | --- |
+| `handoff-<batch>.zip` | `application/zip` |
+| `1-companies.csv`, `2-people.csv`, `3-deals.csv` | `text/csv; charset=utf-8` |
+| `handoff-notes.md` | `text/markdown; charset=utf-8` |
+
+The notes file is Markdown and is served as Markdown deliberately. It is not a CSV precisely so that neither an auto-mapper nor a tired human offers it to Attio's import screen, and serving it as `text/csv` would undo that in one header.
+
+The CSV bytes themselves are [#12](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/12)'s: UTF-8, no BOM, **CRLF**, comma, RFC-4180 quoting, no trailing newline.
+
+An unknown `fileId` under a known run is `404 no_such_file` — a real lookup miss, never an empty download.
 
 ## Validating untrusted input
 
