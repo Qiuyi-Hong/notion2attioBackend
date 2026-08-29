@@ -5,7 +5,7 @@
 - **Ticket:** [What is the CRM status of a half-handed-off row?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29)
 - **Narrows:** [ADR-0001](./0001-flags-attach-to-candidate-records.md), and one sentence of [ADR-0003 (companies)](./0003-a-company-candidate-is-never-dropped-with-its-people.md)
 
-> **Numbering note.** `main` already carries two ADRs numbered 0003 — one from [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8), one from [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) — written concurrently. This takes 0005 rather than 0004 so that 0004 stays free for whoever untangles that.
+> **Numbering note.** `main` already carries two ADRs numbered 0003 — one from [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8), one from [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) — written concurrently. This takes 0005 rather than 0004 so that 0004 stays free for whoever untangles that. [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48) untangled it: #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
 ## Context
 

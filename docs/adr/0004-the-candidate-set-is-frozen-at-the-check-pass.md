@@ -70,7 +70,7 @@ One distinction the freeze depends on: what is frozen is **which flags exist**, 
 
 **`CONTEXT.md` gains two terms, rewrites one, and loses one overstatement.** **Derived value** and **hold** are new; **reviewer edit** is rewritten as above. Candidate state was defined as derived from a candidate's flags and "never set directly" — untrue since #10 gave the reviewer a hold control on every candidate, and further untrue now that a Company's hold reaches its People. It is restated as *read off a candidate's flags and holds*.
 
-**Three ADRs are numbered 0003.** [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) and [#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29) each landed one concurrently, and this one was drafted as a third. It takes 0004; the remaining collision between the other two is left for whoever owns them, since renumbering a merged ADR breaks the links already pointing at it.
+**Three ADRs are numbered 0003.** [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) and [#29](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29) each landed one concurrently, and this one was drafted as a third. It takes 0004; the remaining collision between the other two is left for whoever owns them, since renumbering a merged ADR breaks the links already pointing at it. [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48) took that on and repaired the links: #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
 ## Alternatives considered
 

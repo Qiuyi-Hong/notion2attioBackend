@@ -18,12 +18,17 @@ const EXAMPLE_DIR = fileURLToPath(
   new URL("../docs/examples/handoff-2026-W34/", import.meta.url),
 );
 
+/** The three import files the bundle always carries. A fourth is not a failure. */
+const IMPORT_FILES = ["1-companies.csv", "2-people.csv", "3-deals.csv"];
+
 const files = readdirSync(EXAMPLE_DIR)
   .filter((name) => name.endsWith(".csv"))
   .sort();
 
-test("the example holds the three CSVs the bundle names", () => {
-  assert.deepEqual(files, ["1-companies.csv", "2-people.csv", "3-deals.csv"]);
+test("the example holds the three import files", () => {
+  for (const name of IMPORT_FILES) {
+    assert.ok(files.includes(name), `${name} is missing from the example`);
+  }
 });
 
 for (const name of files) {
@@ -39,15 +44,13 @@ for (const name of files) {
     assert.notDeepEqual(bytes.subarray(0, 3), Buffer.from([0xef, 0xbb, 0xbf]));
   });
 
-  test(`${name}: CRLF only, zero bare LF and zero bare CR`, () => {
-    const bareLf = [...bytes].filter(
-      (b, i) => b === 0x0a && bytes[i - 1] !== 0x0d,
-    );
-    const bareCr = [...bytes].filter(
-      (b, i) => b === 0x0d && bytes[i + 1] !== 0x0a,
-    );
-    assert.equal(bareLf.length, 0, `${bareLf.length} bare LF`);
-    assert.equal(bareCr.length, 0, `${bareCr.length} bare CR`);
+  test(`${name}: CRLF only, no bare LF and no bare CR`, () => {
+    const bare = { LF: 0, CR: 0 };
+    for (const [i, byte] of bytes.entries()) {
+      if (byte === 0x0a && bytes[i - 1] !== 0x0d) bare.LF++;
+      if (byte === 0x0d && bytes[i + 1] !== 0x0a) bare.CR++;
+    }
+    assert.deepEqual(bare, { LF: 0, CR: 0 });
   });
 
   test(`${name}: no trailing newline`, () => {

@@ -5,7 +5,7 @@
 - **Ticket:** [Can a run be confirmed against a connection that did not read it?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/42)
 - **Builds on:** [ADR-0007](./0007-the-write-back-completes-or-is-abandoned.md) — promotes one of its consequences to a rule, and **widens** its precondition on abandoning
 
-> **Numbering note.** `main` still carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). That collision is still open. This takes 0008.
+> **Numbering note.** `main` still carries two ADRs numbered 0003, written concurrently on [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8) and [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16). This takes 0008. That collision was closed by [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48): #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
 ## Context
 
