@@ -1,28 +1,17 @@
 import express from "express";
-import itemRoutes from "./routes/itemRoutes.ts";
-import { errorHandler } from "./middlewares/errorHandler.ts";
 import bodyParser from "body-parser";
+import connectionRoutes from "./routes/connectionRoutes.ts";
+import notionAuthRoutes from "./routes/notionAuthRoutes.ts";
+import { errorHandler } from "./middlewares/errorHandler.ts";
 
 const app = express();
 
 app.use(bodyParser.json());
-app.use(express.static("public"));
 
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS",
-  );
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "X-Requested-With,content-type",
-  );
-  next();
-});
-
-// Routes
-app.use("/items", itemRoutes);
+// No CORS: the Vite dev server proxies /api and /auth, so the browser only
+// ever talks to one origin, and #15 removed cookies entirely.
+app.use("/auth", notionAuthRoutes);
+app.use("/api/connection", connectionRoutes);
 
 // Global error handler (should be after routes)
 app.use(errorHandler);

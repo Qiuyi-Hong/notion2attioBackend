@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# The one SQLite file (#15, #49) - the Connection and its pending authorisation
+*.sqlite

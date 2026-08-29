@@ -34,6 +34,10 @@
 
     // Recommended Options
     "strict": true,
+    // Node runs `src/*.ts` by stripping types, and the tests import it that
+    // way. Syntax that needs emitting (enums, parameter properties) is a
+    // runtime failure there, so tsc has to refuse it here.
+    "erasableSyntaxOnly": true,
     "jsx": "react-jsx",
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
