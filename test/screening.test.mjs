@@ -198,6 +198,14 @@ const noticesIn = (candidates) =>
       .map((flag) => ({ ...flag, on: candidate.id })),
   );
 
+/**
+ * The screening log, read where it lives. It is an audit record rather than a
+ * reviewer surface, so it sits in the run's checkpoint and not on the wire.
+ */
+const screeningOf = async (runId) =>
+  (await graph.getState({ configurable: { thread_id: runId } })).values
+    .screening;
+
 const personFor = (candidates, account) =>
   candidates.people.find(
     (person) => person.sourceId === rowOf(account)["Source ID"],
@@ -216,6 +224,30 @@ test("every scripted quote is a span of the notes it is scripted against", () =>
     }
   }
   assert.equal(SILENT.length + SCREENED.length, rows.length);
+});
+
+test("the prompt ships #6's kind sentences and #30's standing exclusions", async () => {
+  await reviewSnapshot();
+  const [{ system }] = model.calls;
+
+  // Quoted here rather than imported, so a change to the rule set has to be
+  // made in both places deliberately. #6's two sentences, verbatim.
+  assert.ok(
+    system.includes(
+      "Research notes mention an earlier contact under a different email address.",
+    ),
+    "N1 as #6 wrote it",
+  );
+  assert.ok(
+    system.includes("Research notes mention a match with an earlier campaign."),
+    "N2 as #6 wrote it",
+  );
+
+  // #30 found the exclusions load-bearing on this model: without them
+  // `gpt-5.6-sol` raised N2, in every run, on a note denying the match.
+  const [, exclusions] = system.split("These are NOT suspicions:\n\n");
+  assert.ok(exclusions, "the exclusions are in the shipped prompt");
+  assert.equal(exclusions.split("\n\n")[0].split("\n").length, 4, "all four");
 });
 
 // ── What the batch raises ──────────────────────────────────────────────────
@@ -319,6 +351,13 @@ test("no prose the model wrote, and no confidence score, reaches the wire", asyn
   const wire = JSON.stringify(snapshot);
   assert.ok(!wire.includes("I think this person"), "no model prose");
   assert.ok(!wire.includes("confidence"), "and no confidence score");
+  // Not even the quote it pointed at, which is the Reviewer's own text: it is a
+  // check, not a display, and it moves between identical runs (#30).
+  for (const suspicions of Object.values(SUSPICIONS)) {
+    for (const suspicion of suspicions) {
+      assert.ok(!wire.includes(suspicion.quote), "and no quote span");
+    }
+  }
 });
 
 test("the screener changes no value", async () => {
@@ -356,7 +395,8 @@ test("a suspicion whose quote is not in the notes is discarded, and logged", asy
   model.reply = (notes) =>
     accountOf(notes) === target ? [invented] : scripted(notes);
 
-  const { candidates, screening } = await reviewSnapshot();
+  const { runId, candidates } = await reviewSnapshot();
+  const screening = await screeningOf(runId);
 
   const person = personFor(candidates, target);
   assert.deepEqual(person.flags, [], `${target} raised nothing that survived`);
@@ -377,8 +417,30 @@ test("a suspicion whose quote is not in the notes is discarded, and logged", asy
   );
 });
 
+test("an empty quote is not a quote, and is discarded too", async () => {
+  // `"anything".includes("")` is true, so this is the one invention that would
+  // reach the reviewer for free if the check were a bare substring test.
+  const empty = { kind: "N1", quote: "" };
+  const target = SCREENED[0];
+  model.reply = (notes) =>
+    accountOf(notes) === target ? [empty] : scripted(notes);
+
+  const { runId, candidates } = await reviewSnapshot();
+
+  assert.deepEqual(
+    personFor(candidates, target).flags,
+    [],
+    `${target} raised nothing on evidence-free ground`,
+  );
+  const entry = (await screeningOf(runId)).entries.find(
+    (screened) => screened.sourceId === rowOf(target)["Source ID"],
+  );
+  assert.deepEqual(entry.discarded, [empty], "and the log names it");
+});
+
 test("the screening log records the model, the effort and the prompt version", async () => {
-  const { screening } = await reviewSnapshot();
+  const { runId } = await reviewSnapshot();
+  const screening = await screeningOf(runId);
 
   assert.equal(screening.model, "gpt-5.6-sol");
   assert.equal(screening.effort, "low");
@@ -401,13 +463,15 @@ test("the notices are checkpointed, and re-reading the run costs nothing", async
     noticesIn(first.candidates).length > 0,
     "there is a notice to move",
   );
+  const log = await screeningOf(first.runId);
   const calls = model.calls.length;
 
   for (let poll = 0; poll < 3; poll += 1) {
     const again = await (await fetch(`${base}/api/runs/${first.runId}`)).json();
     assert.equal(again.status, "awaiting_review");
     assert.deepEqual(again.candidates, first.candidates);
-    assert.deepEqual(again.screening, first.screening);
+    assert.equal(again.screening, undefined, "the log is not a wire field");
+    assert.deepEqual(await screeningOf(first.runId), log);
     // The reading is checkpointed, not re-taken: it cannot change under the
     // Reviewer mid-decision, and it is not charged again.
     assert.equal(model.calls.length, calls);
@@ -430,7 +494,7 @@ test("the rows are screened in parallel, and the node checkpoints once", async (
     return scripted(notes);
   };
 
-  const { runId, screening } = await reviewSnapshot();
+  const { runId } = await reviewSnapshot();
   assert.equal(
     model.maxInFlight,
     rows.length,
@@ -447,5 +511,5 @@ test("the rows are screened in parallel, and the node checkpoints once", async (
   assert.equal(screened.length, 1, "one checkpoint carries the screening");
   assert.deepEqual(screened[0].next, ["review"], "and the interrupt is next");
   // Nothing moved until all eight were back.
-  assert.equal(screening.entries.length, rows.length);
+  assert.equal((await screeningOf(runId)).entries.length, rows.length);
 });

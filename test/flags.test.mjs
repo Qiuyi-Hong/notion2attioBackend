@@ -375,11 +375,10 @@ test("deal owner and stage are asked once for the batch, not once per deal", asy
 // ── No model key ───────────────────────────────────────────────────────────
 
 test("with no key the notes go unread, and the batch says so out loud", async () => {
-  const { status, batchFlags, candidates, screening } = await reviewSnapshot();
+  const { status, batchFlags, candidates } = await reviewSnapshot();
 
   assert.equal(status, "awaiting_review", "the run still completes");
   assert.equal(model.calls.length, 0, "and nothing read the notes");
-  assert.equal(screening, null, "so there is no screening log");
 
   // A notice, so the reviewer must acknowledge it like any other Warn: a
   // missing key never silently produces a batch that looks clean.

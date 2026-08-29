@@ -4,6 +4,7 @@
 - **Date:** 2026-08-29
 - **Ticket:** [What is the CRM status of a half-handed-off row?](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/29)
 - **Narrows:** [ADR-0001](./0001-flags-attach-to-candidate-records.md), and one sentence of [ADR-0003 (companies)](./0003-a-company-candidate-is-never-dropped-with-its-people.md)
+- **Narrowed by:** [#55](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/55) — a notice does not hold a Deal. See [Amendment](#amendment-55--a-notice-does-not-hold-a-deal).
 
 > **Numbering note.** `main` already carries two ADRs numbered 0003 — one from [#8](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/8), one from [#16](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/16) — written concurrently. This takes 0005 rather than 0004 so that 0004 stays free for whoever untangles that. [#48](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/48) untangled it: #16's is now [ADR-0009](./0009-the-server-keeps-its-own-record-of-runs.md).
 
@@ -43,6 +44,16 @@ ADR-0003 reasons carefully about the Company surviving the week and does not tes
 **The Batch is the unit of retry.** The Notion filter is `Batch = 2026-W34` **and** `CRM status = Ready for CRM`, so a held W34 row does not appear in a W35 run at all — it is reached by running W34 again, which returns exactly the rows still `Ready for CRM`.
 
 **This Stop has no "send anyway" override.** It is cleared by completing the account, not by forcing past it.
+
+### Amendment (#55) — a notice does not hold a Deal
+
+*"Clear or answered"* was written when every flag was a Stop or a decision Warn. [#55](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/55) brought the notes screener, and with it the first Warns that sit on a **Person**: the notice Warns N1 and N2. Read literally at the check pass, this ADR would then put a `D1` Stop on Heliograph's and Lattice Forge's Deals, because a notice nobody has ticked yet is neither Clear nor answered. [#53](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/53) saw this coming and left the question to the ticket that brought the screener. **It does not.**
+
+The reason is that a notice cannot produce either failure this ADR exists to prevent. Both come from a Person who is **not sent**: a Deal attached to nobody, or a Deal created twice across two runs. A notice does not withhold its Person — per [`CONTEXT.md`](../../CONTEXT.md), *"a Warn excludes nothing"*, and a candidate is `Held` only by a Stop, by the reviewer, or by its Company. Heliograph's and Lattice Forge's People ship, their accounts are whole, and their Deals have someone to attach to. `CONTEXT.md`'s operative sentence — *"a **held** Person holds its account's Deal"* — is already exactly this rule, and is untouched.
+
+The **emission** rule is untouched too, and is what keeps the change honest: the batch cannot export while any Warn is unanswered, so by the time any Deal is emitted every notice on its account has been read. *Clear or answered* still holds literally at the only moment it decides anything.
+
+What the literal reading would have cost is a Stop that says *this account is not whole* about two accounts that are — unforceable, on precisely the two candidates already carrying the most to think about — and [#56](https://github.com/Qiuyi-Hong/notion2attioBackend/issues/56)'s W34 bundle would emit four deal rows rather than the six it specifies.
 
 ### Why Companies and Deals are treated differently
 

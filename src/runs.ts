@@ -106,12 +106,12 @@ export async function snapshotOf(run: RunRecord) {
     },
     batchFlags: values.batchFlags ?? [],
     repairs: values.repairs ?? [],
-    /**
-     * The screening log, on the same rule as the repair log: not needing the
-     * Reviewer's attention is not the same as being hidden (ADR-0002). `null`
-     * until `check` has run, and after it when there was no key.
-     */
-    screening: values.screening ?? null,
+    // The screening log is deliberately **not** here. It is an audit record,
+    // not a reviewer surface: nothing downstream reads it (#56's notes file
+    // carries the repair log and the flags; #60's ledger renders neither), and
+    // a discarded quote is the one piece of model-authored text in the run.
+    // Keeping it in the checkpoint is what makes #60's *the quote span is never
+    // rendered* structural rather than a promise the browser has to keep.
     // The three below stay null until they mean something.
     files: null,
     writeBack: null,

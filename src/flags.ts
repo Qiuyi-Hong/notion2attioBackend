@@ -127,20 +127,23 @@ export interface CheckedLedger {
  *   One Stop, naming every sibling that caused it, offering **no** override;
  *   it is cleared by completing the account.
  *
- * D1 reads *not Clear or answered* exactly as ADR-0005 writes it — but a
- * **notice** is not one of the things it waits for, which is the question #53
- * left for the ticket that brought the screener. A notice asserts nothing
- * about the account: it relays a suspicion that this person may already exist
- * somewhere the pipeline cannot see, and the account is whole either way. A
- * Stop on Heliograph's and Lattice Forge's Deals would say *this account is not
- * whole* about two accounts that are, on exactly the two candidates already
- * carrying the most to think about. Nothing reaches Attio unread regardless:
- * the batch cannot export with an unanswered Warn.
+ * D1 reads *not Clear or answered* as ADR-0005 writes it, **less notices** —
+ * the question #53 left for the ticket that brought the screener, answered in
+ * that ADR's own amendment. Both failures it exists to prevent come from a
+ * Person who is not sent, and a notice does not withhold one: a Warn excludes
+ * nothing, so the account is whole and its Deal has someone to attach to. The
+ * export gate is what still guarantees the notice was read, since the batch
+ * cannot export with an unanswered Warn.
  *
  * The rules the settled set also holds — B2, W2, W3, and the Stop on a Deal
  * whose `Owner` is empty — are not built. No W34 row reaches any of them, so
  * each would be a rule with nothing to answer for it.
  * ponytail: add one the week a batch first contains it.
+ *
+ * `notices` is the screener's reading, keyed by the Person candidate that
+ * carries it. `null` is not the same as empty: **empty** is *the notes were
+ * read and raised nothing*, and `null` is *nothing read them*, which is the one
+ * thing that raises the `N0` batch flag.
  */
 export function checkFlags(
   ledger: Ledger,
@@ -166,7 +169,9 @@ export function checkFlags(
     // sentence per kind and their own notes, never the model's words.
     const kinds = notices?.get(person.id);
     if (kinds?.length) {
-      const rule = kinds.join("+") as Flag["rule"];
+      // Parsed rather than cast: the closed list this file argues for is
+      // enforced at the one place a rule name is built rather than written.
+      const rule = Flag.shape.rule.parse(kinds.join("+"));
       flags.push({
         id: `${rule}:${person.id}`,
         rule,

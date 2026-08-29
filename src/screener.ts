@@ -26,11 +26,12 @@ import config from "./config/config.ts";
 import type { SourceRow } from "./notion.ts";
 
 /**
- * The two notice kinds, quoted **verbatim** from #6's rule table. One constant
- * feeds the prompt and is the sentence the surface renders, so the rule set and
- * the prompt cannot drift apart.
+ * The two notice kinds, quoted **verbatim** from #6's rule table. The prompt is
+ * built from this one constant, so the rule set and the prompt cannot drift
+ * apart. The surface renders its own fixed sentence for the kind it is sent —
+ * these strings never travel, because no prose does (ADR-0002).
  */
-export const KINDS = {
+const KINDS = {
   N1: "Research notes mention an earlier contact under a different email address.",
   N2: "Research notes mention a match with an earlier campaign.",
 } as const;
@@ -102,11 +103,11 @@ const SCHEMA = {
  * comes back as a different span between identical runs, so the surface never
  * renders it (#60). It is kept because the log records what came back.
  */
-export const Suspicion = z.object({
+const Suspicion = z.object({
   kind: z.enum(["N1", "N2"]),
   quote: z.string(),
 });
-export type Suspicion = z.infer<typeof Suspicion>;
+type Suspicion = z.infer<typeof Suspicion>;
 
 /**
  * The screening log, beside the repair log and on the same rule: *silent* means
@@ -209,7 +210,12 @@ export async function screenNotes(
       // The quote check. An exact substring, with no normalisation: the model
       // points at evidence, and the pipeline checks the pointer.
       for (const suspicion of await screenRow(notes, apiKey)) {
-        (notes.includes(suspicion.quote) ? kept : discarded).push(suspicion);
+        // An empty quote is *not* a quote: `includes("")` is true of every
+        // string, so without this a suspicion pointing at nothing would pass
+        // the one check that stands between an invention and the Reviewer.
+        const verbatim =
+          suspicion.quote !== "" && notes.includes(suspicion.quote);
+        (verbatim ? kept : discarded).push(suspicion);
       }
       return { sourceId: row["Source ID"] ?? "", kept, discarded };
     }),
